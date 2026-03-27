@@ -1,0 +1,59 @@
+[package]
+name = "flow-run"
+version = "0.1.0"
+edition = "2021"
+description = "专为 AI Agent 设计的声明式工作流引擎"
+license = "MIT"
+
+[dependencies]
+# CLI 框架
+clap = { version = "4.4", features = ["derive"] }
+
+# 序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# 异步运行时
+tokio = { version = "1.35", features = ["full"] }
+
+# 异步 trait 支持
+async-trait = "0.1"
+
+# HTTP 客户端
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+
+# 正则表达式
+regex = "1.10"
+
+# UUID 生成
+uuid = { version = "1.6", features = ["v4"] }
+
+# 随机数生成
+rand = "0.8"
+
+# 日期时间
+chrono = { version = "0.4", features = ["serde"] }
+
+# 日志
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# 速率限制
+governor = "0.6"
+
+# 错误处理
+thiserror = "1.0"
+anyhow = "1.0"
+
+# 文件系统监控
+notify = "6.1"
+
+# Cron 表达式
+cron = "0.12"
+
+[dev-dependencies]
+# 测试用
+tempfile = "3.9"
+wiremock = "0.5"
+tokio-test = "0.4"
