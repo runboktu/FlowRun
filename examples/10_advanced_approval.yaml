@@ -1,0 +1,86 @@
+# 高级示例 - Human-in-the-Loop 审批
+#
+# 这个示例展示：
+# - 人工审批步骤
+# - 自动审批条件
+# - 审批超时处理
+# - 审批通知
+
+name: "审批流程示例"
+description: "演示人工审批和自动化决策"
+
+version: "1.0.0"
+
+inputs:
+  - name: change_request_id
+    type: string
+    required: true
+  - name: risk_level
+    type: string
+    required: false
+    default: "low"
+
+config:
+  timeout: "1h"
+
+steps:
+  # 预检查
+  - id: pre_check
+    name: "变更预检查"
+    type: shell
+    run: |
+      echo "检查变更请求: ${{ inputs.change_request_id }}"
+      echo "风险等级: ${{ inputs.risk_level }}"
+      echo "预检查通过"
+
+  # 根据风险级别决定是否需要人工审批
+  - id: approval_gate
+    name: "审批门控"
+    type: approve
+    message: |
+      变更请求: ${{ inputs.change_request_id }}
+      风险等级: ${{ inputs.risk_level }}
+
+      请审批此变更是否可以执行。
+    approvers:
+      - "admin@example.com"
+      - "ops-team@example.com"
+    require_comment: true
+    on_timeout: abort
+    auto_approve_on:
+      - condition: "inputs.risk_level == 'low'"
+        reason: "低风险变更自动批准"
+      - condition: "variables.emergency_mode == true"
+        reason: "紧急模式自动批准"
+    depends_on:
+      - pre_check
+
+  # 执行变更
+  - id: execute_change
+    name: "执行变更"
+    type: shell
+    run: |
+      echo "执行变更: ${{ inputs.change_request_id }}"
+      echo "审批人: ${{ steps.approval_gate.approved_by }}"
+      echo "审批意见: ${{ steps.approval_gate.comment }}"
+    depends_on:
+      - approval_gate
+
+  # 变更后验证
+  - id: post_verification
+    name: "变更后验证"
+    type: http
+    api: "https://api.example.com/health"
+    method: GET
+    expect:
+      status_code: 200
+    depends_on:
+      - execute_change
+
+variables:
+  emergency_mode: false
+
+outputs:
+  change_status: "completed"
+  approved_by: "${{ steps.approval_gate.approved_by }}"
+  approval_comment: "${{ steps.approval_gate.comment }}"

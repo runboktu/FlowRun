@@ -1,0 +1,90 @@
+# 高级示例 - 条件分支
+#
+# 这个示例展示：
+# - if/else 条件分支
+# - 基于表达式的条件判断
+# - 动态工作流路由
+
+name: "条件分支示例"
+description: "演示条件执行和动态分支"
+
+version: "1.0.0"
+
+inputs:
+  - name: environment
+    type: string
+    required: true
+    description: "部署环境 (development/staging/production)"
+  - name: skip_tests
+    type: boolean
+    required: false
+    default: false
+
+steps:
+  # 检查环境
+  - id: check_environment
+    name: "检查部署环境"
+    type: shell
+    run: |
+      ENV="${{ inputs.environment }}"
+      echo "当前环境: $ENV"
+
+  # 根据环境选择不同的部署策略
+  - id: deploy_by_env
+    name: "按环境部署"
+    type: condition
+    expression: "inputs.environment == 'production'"
+    then_steps:
+      - id: production_deploy
+        name: "生产环境部署"
+        type: shell
+        run: |
+          echo "执行生产环境部署..."
+          echo "1. 备份当前版本"
+          echo "2. 健康检查"
+          echo "3. 滚动更新"
+          echo "4. 验证部署"
+
+      - id: notify_team
+        name: "通知团队"
+        type: shell
+        run: "echo '发送生产部署通知到 Slack'"
+        depends_on:
+          - production_deploy
+
+    else_steps:
+      - id: staging_deploy
+        name: "非生产环境部署"
+        type: shell
+        run: |
+          echo "执行 ${{ inputs.environment }} 环境部署..."
+          echo "1. 直接部署"
+          echo "2. 快速验证"
+
+    depends_on:
+      - check_environment
+
+  # 嵌套条件：根据是否跳过测试
+  - id: run_tests
+    name: "运行测试"
+    type: condition
+    expression: "inputs.skip_tests == false"
+    then_steps:
+      - id: execute_tests
+        name: "执行测试套件"
+        type: shell
+        run: |
+          echo "运行单元测试..."
+          echo "运行集成测试..."
+          echo "生成测试报告..."
+    else_steps:
+      - id: skip_tests_step
+        name: "跳过测试"
+        type: shell
+        run: "echo '已跳过测试'"
+    depends_on:
+      - deploy_by_env
+
+outputs:
+  environment: "${{ inputs.environment }}"
+  deploy_status: "completed"

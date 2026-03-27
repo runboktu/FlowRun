@@ -1,0 +1,39 @@
+# 基础示例 - 简单 HTTP 请求
+#
+# 这个示例展示最基本的 HTTP 步骤执行：
+# - 发送 GET 请求获取数据
+# - 使用模板表达式引用步骤输出
+# - 输出最终结果
+
+name: "基础 HTTP 请求示例"
+description: "演示如何发送 HTTP 请求并处理响应"
+
+version: "1.0.0"
+
+inputs:
+  - name: api_url
+    type: string
+    required: true
+    description: "要请求的 API 地址"
+
+steps:
+  # 第一步：获取用户数据
+  - id: fetch_user
+    name: "获取用户信息"
+    type: http
+    api: "${{ inputs.api_url }}/users/1"
+    method: GET
+    headers:
+      Accept: "application/json"
+
+  # 第二步：使用第一步的输出
+  - id: display_user
+    name: "显示用户信息"
+    type: shell
+    run: "echo '用户名: ${{ steps.fetch_user.response.body.name }}, 邮箱: ${{ steps.fetch_user.response.body.email }}'"
+    depends_on:
+      - fetch_user
+
+outputs:
+  user_name: "${{ steps.fetch_user.response.body.name }}"
+  user_email: "${{ steps.fetch_user.response.body.email }}"

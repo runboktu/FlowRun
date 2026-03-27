@@ -1,0 +1,69 @@
+# 高级示例 - 子工作流组合
+#
+# 这个示例展示：
+# - 调用子工作流
+# - 传递输入参数
+# - 错误传播策略
+# - 模块化工作流设计
+
+name: "子工作流示例"
+description: "演示工作流的模块化和组合"
+
+version: "1.0.0"
+
+inputs:
+  - name: project_name
+    type: string
+    required: true
+  - name: deploy_env
+    type: string
+    required: true
+
+steps:
+  # 调用构建子工作流
+  - id: build_step
+    name: "执行构建"
+    type: workflow
+    workflow: "workflows/build.yaml"
+    inputs:
+      project: "${{ inputs.project_name }}"
+      optimize: "true"
+    error_strategy: propagate
+
+  # 调用测试子工作流
+  - id: test_step
+    name: "执行测试"
+    type: workflow
+    workflow: "workflows/test.yaml"
+    inputs:
+      project: "${{ inputs.project_name }}"
+      test_type: "all"
+    error_strategy: continue
+    depends_on:
+      - build_step
+
+  # 调用部署子工作流
+  - id: deploy_step
+    name: "执行部署"
+    type: workflow
+    workflow: "workflows/deploy.yaml"
+    inputs:
+      project: "${{ inputs.project_name }}"
+      environment: "${{ inputs.deploy_env }}"
+      artifact_path: "${{ steps.build_step.outputs.artifact_path }}"
+    error_strategy: retry
+    depends_on:
+      - test_step
+
+  # 清理步骤
+  - id: cleanup
+    name: "清理临时文件"
+    type: shell
+    run: "echo '清理构建产物...'"
+    depends_on:
+      - deploy_step
+
+outputs:
+  build_artifact: "${{ steps.build_step.outputs.artifact_path }}"
+  test_report: "${{ steps.test_step.outputs.report_url }}"
+  deploy_url: "${{ steps.deploy_step.outputs.deployment_url }}"

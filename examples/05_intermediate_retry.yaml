@@ -1,0 +1,58 @@
+# 中级示例 - 错误处理与重试
+#
+# 这个示例展示：
+# - 步骤级重试配置
+# - 不同的退避策略
+# - 失败处理策略 (Abort/Pause/Continue)
+# - 期望结果验证
+
+name: "错误处理示例"
+description: "演示重试机制和错误处理策略"
+
+version: "1.0.0"
+
+config:
+  timeout: "10m"
+  on_failure: pause
+  checkpoint: "/tmp/workflow-checkpoint.json"
+
+steps:
+  # 带重试的 HTTP 请求
+  - id: fetch_with_retry
+    name: "带重试的数据获取"
+    type: http
+    api: "https://httpstat.us/503"
+    method: GET
+    retry:
+      max_attempts: 3
+      strategy: exponential
+      initial_delay: 1
+      max_delay: 10
+      jitter: true
+    expect:
+      status_code: 200
+
+  # 验证响应内容
+  - id: validate_response
+    name: "验证响应数据"
+    type: http
+    api: "https://jsonplaceholder.typicode.com/posts/1"
+    method: GET
+    expect:
+      status_code: 200
+      body_contains: "userId"
+    depends_on:
+      - fetch_with_retry
+
+  # 带超时的 Shell 命令
+  - id: long_running_task
+    name: "长时间运行的任务"
+    type: shell
+    run: "sleep 2 && echo '任务完成'"
+    timeout: "30s"
+    depends_on:
+      - validate_response
+
+outputs:
+  status: "success"
+  completed_at: "${{ steps.long_running_task.completed_at }}"

@@ -1,0 +1,59 @@
+# 基础示例 - 步骤依赖和数据流
+#
+# 这个示例展示：
+# - 多步骤之间的依赖关系
+# - 使用模板表达式传递数据
+# - DAG 自动调度（无依赖的步骤并行执行）
+
+name: "步骤依赖示例"
+description: "演示步骤之间的依赖关系和数据传递"
+
+version: "1.0.0"
+
+inputs:
+  - name: source_url
+    type: string
+    required: true
+  - name: target_path
+    type: string
+    required: true
+
+steps:
+  # 并行执行：获取数据和准备环境
+  - id: fetch_data
+    name: "获取源数据"
+    type: http
+    api: "${{ inputs.source_url }}"
+    method: GET
+
+  - id: prepare_env
+    name: "准备目标环境"
+    type: shell
+    run: "mkdir -p $(dirname ${{ inputs.target_path }}) && echo '环境已准备'"
+
+  # 这两个步骤没有依赖关系，会并行执行
+
+  # 处理数据（依赖 fetch_data）
+  - id: process_data
+    name: "处理数据"
+    type: shell
+    run: |
+      echo '处理数据...'
+      echo '数据大小: $(echo '${{ steps.fetch_data.response.body }}' | wc -c) 字节'
+    depends_on:
+      - fetch_data
+
+  # 保存结果（依赖 process_data 和 prepare_env）
+  - id: save_result
+    name: "保存处理结果"
+    type: shell
+    run: |
+      echo '${{ steps.process_data.stdout }}' > ${{ inputs.target_path }}
+      echo "结果已保存到 ${{ inputs.target_path }}"
+    depends_on:
+      - process_data
+      - prepare_env
+
+outputs:
+  data_size: "${{ steps.process_data.stdout }}"
+  saved_path: "${{ inputs.target_path }}"

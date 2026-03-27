@@ -1,0 +1,79 @@
+# 中级示例 - 模板表达式与过滤器
+#
+# 这个示例展示：
+# - 模板表达式语法 ${{ ... }}
+# - 内置过滤器的使用
+# - 条件表达式 (||, ==)
+# - 路径访问和数组索引
+
+name: "模板表达式示例"
+description: "演示模板表达式和过滤器的使用"
+
+version: "1.0.0"
+
+inputs:
+  - name: username
+    type: string
+    required: true
+  - name: environment
+    type: string
+    required: false
+    default: "staging"
+
+steps:
+  # 获取用户数据
+  - id: fetch_user
+    name: "获取用户数据"
+    type: http
+    api: "https://jsonplaceholder.typicode.com/users/1"
+    method: GET
+
+  # 使用过滤器处理数据
+  - id: process_data
+    name: "处理用户数据"
+    type: shell
+    run: |
+      echo "原始名称: ${{ steps.fetch_user.response.body.name }}"
+      echo "大写名称: ${{ steps.fetch_user.response.body.name | uppercase }}"
+      echo "小写邮箱: ${{ steps.fetch_user.response.body.email | lowercase }}"
+      echo "截断地址: ${{ steps.fetch_user.response.body.address.city | truncate(5) }}"
+    depends_on:
+      - fetch_user
+
+  # 使用条件表达式
+  - id: conditional_step
+    name: "条件判断"
+    type: shell
+    run: |
+      ENV="${{ inputs.environment || 'development' }}"
+      echo "当前环境: $ENV"
+
+      if [ "$ENV" == "production" ]; then
+        echo "生产环境 - 执行严格检查"
+      else
+        echo "非生产环境 - 跳过严格检查"
+      fi
+    depends_on:
+      - process_data
+
+  # 数组操作
+  - id: array_operations
+    name: "数组操作"
+    type: shell
+    run: |
+      echo "第一个元素: ${{ variables.items[0] }}"
+      echo "数组长度: ${{ variables.items | length }}"
+      echo "数组切片: ${{ variables.items | slice(0, 2) | join(', ') }}"
+    depends_on:
+      - conditional_step
+
+variables:
+  items:
+    - "apple"
+    - "banana"
+    - "cherry"
+    - "date"
+
+outputs:
+  processed_name: "${{ steps.fetch_user.response.body.name | uppercase }}"
+  environment: "${{ inputs.environment || 'development' }}"

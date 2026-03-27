@@ -57,3 +57,32 @@ cron = "0.12"
 tempfile = "3.9"
 wiremock = "0.5"
 tokio-test = "0.4"
+
+# 示例代码
+[[example]]
+name = "01_load_workflow"
+path = "examples/code/01_load_workflow.rs"
+
+[[example]]
+name = "02_execution_context"
+path = "examples/code/02_execution_context.rs"
+
+[[example]]
+name = "03_dag_scheduler"
+path = "examples/code/03_dag_scheduler.rs"
+
+[[example]]
+name = "04_template_engine"
+path = "examples/code/04_template_engine.rs"
+
+[[example]]
+name = "05_retry_engine"
+path = "examples/code/05_retry_engine.rs"
+
+[[example]]
+name = "06_checkpoint"
+path = "examples/code/06_checkpoint.rs"
+
+[[example]]
+name = "07_full_execution"
+path = "examples/code/07_full_execution.rs"

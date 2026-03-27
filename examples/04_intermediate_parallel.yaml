@@ -1,0 +1,56 @@
+# 中级示例 - 并行执行与限流
+#
+# 这个示例展示：
+# - 使用 parallel 类型并行执行多个子步骤
+# - 并发控制 (max_concurrent)
+# - 速率限制 (rate_limit)
+
+name: "并行执行示例"
+description: "演示并行执行多个任务和并发控制"
+
+version: "1.0.0"
+
+inputs:
+  - name: api_endpoints
+    type: string
+    required: true
+    description: "逗号分隔的 API 端点列表"
+
+steps:
+  # 并行调用多个 API
+  - id: parallel_api_calls
+    name: "并行 API 调用"
+    type: parallel
+    max_concurrent: 3
+    steps:
+      - id: call_api_1
+        name: "调用 API 1"
+        type: http
+        api: "https://jsonplaceholder.typicode.com/posts/1"
+        method: GET
+
+      - id: call_api_2
+        name: "调用 API 2"
+        type: http
+        api: "https://jsonplaceholder.typicode.com/posts/2"
+        method: GET
+
+      - id: call_api_3
+        name: "调用 API 3"
+        type: http
+        api: "https://jsonplaceholder.typicode.com/posts/3"
+        method: GET
+
+  # 聚合结果
+  - id: aggregate
+    name: "聚合结果"
+    type: shell
+    run: |
+      echo "API 1 标题: ${{ steps.call_api_1.response.body.title }}"
+      echo "API 2 标题: ${{ steps.call_api_2.response.body.title }}"
+      echo "API 3 标题: ${{ steps.call_api_3.response.body.title }}"
+    depends_on:
+      - parallel_api_calls
+
+outputs:
+  results: "${{ steps.aggregate.stdout }}"

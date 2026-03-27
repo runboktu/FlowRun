@@ -1,0 +1,236 @@
+# 综合示例 - 完整的 CI/CD 工作流
+#
+# 这个示例综合展示所有功能：
+# - 多阶段流水线 (Build -> Test -> Deploy)
+# - 并行测试执行
+# - 条件部署（基于分支）
+# - 错误处理和重试
+# - 检查点恢复
+# - 审批门控
+# - 模板表达式和过滤器
+
+name: "CI/CD 完整流水线"
+description: "一个完整的持续集成/持续部署工作流"
+
+version: "1.0.0"
+
+inputs:
+  - name: repo_url
+    type: string
+    required: true
+    description: "Git 仓库地址"
+  - name: branch
+    type: string
+    required: false
+    default: "main"
+  - name: deploy_env
+    type: string
+    required: true
+    enum: ["development", "staging", "production"]
+  - name: skip_tests
+    type: boolean
+    required: false
+    default: false
+
+config:
+  timeout: "30m"
+  on_failure: pause
+  checkpoint: "/tmp/ci-cd-checkpoint.json"
+  max_concurrent: 4
+
+on:
+  workflow_failure:
+    - run: "echo '工作流失败，发送告警邮件'"
+
+steps:
+  # ==================== 阶段 1: 准备 ====================
+  - id: checkout
+    name: "检出代码"
+    type: shell
+    run: |
+      echo "检出仓库: ${{ inputs.repo_url }}"
+      echo "分支: ${{ inputs.branch }}"
+      REPO_NAME=$(basename ${{ inputs.repo_url }} .git)
+      echo "仓库名: $REPO_NAME"
+
+  - id: detect_changes
+    name: "检测变更"
+    type: shell
+    run: |
+      echo "分析变更文件..."
+      echo "前端变更: true"
+      echo "后端变更: true"
+    depends_on:
+      - checkout
+
+  # ==================== 阶段 2: 构建 ====================
+  - id: build_frontend
+    name: "构建前端"
+    type: shell
+    run: |
+      echo "安装前端依赖..."
+      echo "编译 TypeScript..."
+      echo "打包资源..."
+      echo "构建完成，产物大小: 2.5MB"
+    depends_on:
+      - detect_changes
+
+  - id: build_backend
+    name: "构建后端"
+    type: shell
+    run: |
+      echo "安装后端依赖..."
+      echo "编译代码..."
+      echo "生成镜像..."
+      echo "镜像标签: v1.0.0-${{ inputs.branch }}"
+    depends_on:
+      - detect_changes
+
+  # ==================== 阶段 3: 测试 ====================
+  - id: test_parallel
+    name: "并行测试"
+    type: condition
+    expression: "inputs.skip_tests == false"
+    then_steps:
+      - id: unit_tests
+        name: "单元测试"
+        type: parallel
+        max_concurrent: 2
+        steps:
+          - id: frontend_unit
+            name: "前端单元测试"
+            type: shell
+            run: |
+              echo "运行前端单元测试..."
+              echo "测试通过: 150/150"
+              echo "覆盖率: 85%"
+
+          - id: backend_unit
+            name: "后端单元测试"
+            type: shell
+            run: |
+              echo "运行后端单元测试..."
+              echo "测试通过: 200/200"
+              echo "覆盖率: 92%"
+
+      - id: integration_tests
+        name: "集成测试"
+        type: shell
+        run: |
+          echo "运行集成测试..."
+          echo "API 测试通过: 45/45"
+          echo "E2E 测试通过: 12/12"
+        depends_on:
+          - unit_tests
+
+    else_steps:
+      - id: skip_tests
+        name: "跳过测试"
+        type: shell
+        run: "echo '已跳过所有测试'"
+    depends_on:
+      - build_frontend
+      - build_backend
+
+  # ==================== 阶段 4: 安全扫描 ====================
+  - id: security_scan
+    name: "安全扫描"
+    type: http
+    api: "https://api.security-scan.example.com/scan"
+    method: POST
+    headers:
+      Authorization: "Bearer ${{ variables.SECURITY_TOKEN }}"
+    body:
+      repo: "${{ inputs.repo_url }}"
+      branch: "${{ inputs.branch }}"
+    retry:
+      max_attempts: 2
+      strategy: fixed
+      initial_delay: 5
+    depends_on:
+      - build_frontend
+      - build_backend
+
+  # ==================== 阶段 5: 部署门控 ====================
+  - id: deploy_gate
+    name: "部署审批"
+    type: condition
+    expression: "inputs.deploy_env == 'production'"
+    then_steps:
+      - id: production_approval
+        name: "生产环境审批"
+        type: approve
+        message: |
+          生产部署请求
+
+          仓库: ${{ inputs.repo_url }}
+          分支: ${{ inputs.branch }}
+          测试覆盖率: 85%+
+
+          请确认是否批准生产部署。
+        approvers:
+          - "tech-lead@company.com"
+          - "devops@company.com"
+        require_comment: true
+        on_timeout: pause
+        auto_approve_on:
+          - condition: "variables.hotfix_mode == true"
+            reason: "热修复自动批准"
+
+    else_steps:
+      - id: auto_approve
+        name: "非生产环境自动通过"
+        type: shell
+        run: "echo '非生产环境，自动通过审批'"
+    depends_on:
+      - test_parallel
+      - security_scan
+
+  # ==================== 阶段 6: 部署 ====================
+  - id: deploy
+    name: "执行部署"
+    type: shell
+    run: |
+      echo "开始部署到 ${{ inputs.deploy_env }}..."
+      echo "部署版本: v1.0.0-${{ inputs.branch }}"
+      echo "部署时间: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      echo "部署完成!"
+    depends_on:
+      - deploy_gate
+
+  # ==================== 阶段 7: 部署后验证 ====================
+  - id: post_deploy_check
+    name: "部署后健康检查"
+    type: http
+    api: "https://${{ inputs.deploy_env }}.api.example.com/health"
+    method: GET
+    expect:
+      status_code: 200
+    retry:
+      max_attempts: 3
+      strategy: exponential
+      initial_delay: 10
+    depends_on:
+      - deploy
+
+  # ==================== 阶段 8: 通知 ====================
+  - id: notify
+    name: "发送部署通知"
+    type: shell
+    run: |
+      echo "发送 Slack 通知..."
+      echo "环境: ${{ inputs.deploy_env }}"
+      echo "状态: 成功"
+      echo "版本: v1.0.0-${{ inputs.branch }}"
+    depends_on:
+      - post_deploy_check
+
+variables:
+  SECURITY_TOKEN: "sk-xxx"
+  hotfix_mode: false
+
+outputs:
+  deployment_id: "deploy-$(date +%s)"
+  deploy_url: "https://${{ inputs.deploy_env }}.example.com"
+  test_coverage: "85%"
+  status: "success"
