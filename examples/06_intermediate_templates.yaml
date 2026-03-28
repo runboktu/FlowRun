@@ -36,7 +36,7 @@ steps:
       echo "原始名称: ${{ steps.fetch_user.response.body.name }}"
       echo "大写名称: ${{ steps.fetch_user.response.body.name | uppercase }}"
       echo "小写邮箱: ${{ steps.fetch_user.response.body.email | lowercase }}"
-      echo "截断地址: ${{ steps.fetch_user.response.body.address.city | truncate(5) }}"
+      echo "截断地址: ${{ steps.fetch_user.response.body.address.city | truncate(3) }}"
     depends_on:
       - fetch_user
 

@@ -361,8 +361,15 @@ impl Scheduler {
         let template_engine = crate::core::template::TemplateEngine::new();
 
         // 构建完整的模板上下文（包含 inputs、variables、steps）
-        let mut template_ctx = ctx.variables.clone();
-        template_ctx.insert("inputs".to_string(), serde_json::to_value(&ctx.inputs).unwrap_or_default());
+        let mut template_ctx = HashMap::new();
+
+        // 添加 variables（包含工作流定义的变量）
+        let variables_value = serde_json::to_value(&ctx.variables).unwrap_or_default();
+        template_ctx.insert("variables".to_string(), variables_value);
+
+        // 添加 inputs
+        let inputs_value = serde_json::to_value(&ctx.inputs).unwrap_or_default();
+        template_ctx.insert("inputs".to_string(), inputs_value);
 
         // 构建 steps 上下文：只包含 output 字段，便于模板直接访问
         let mut steps_ctx = serde_json::Map::new();
@@ -455,8 +462,15 @@ impl Scheduler {
         let template_engine = crate::core::template::TemplateEngine::new();
 
         // 构建完整的模板上下文（包含 inputs、variables、steps）
-        let mut template_ctx = ctx.variables.clone();
-        template_ctx.insert("inputs".to_string(), serde_json::to_value(&ctx.inputs).unwrap_or_default());
+        let mut template_ctx = HashMap::new();
+
+        // 添加 variables（包含工作流定义的变量）
+        let variables_value = serde_json::to_value(&ctx.variables).unwrap_or_default();
+        template_ctx.insert("variables".to_string(), variables_value);
+
+        // 添加 inputs
+        let inputs_value = serde_json::to_value(&ctx.inputs).unwrap_or_default();
+        template_ctx.insert("inputs".to_string(), inputs_value);
 
         // 构建 steps 上下文：只包含 output 字段，便于模板直接访问
         let mut steps_ctx = serde_json::Map::new();

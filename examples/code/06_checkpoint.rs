@@ -1,115 +1,116 @@
-//! 高级示例 - 检查点管理
+//! 中级示例 - 模板表达式与过滤器
 //!
 //! 这个示例展示如何：
-//! - 创建检查点
-//! - 保存和加载检查点
-//! - 从检查点恢复执行
+//! - 加载模板表达式工作流
+//! - 使用 Scheduler 执行工作流
+//! - 观察模板过滤器和条件表达式
 
-use flow_run::utils::checkpoint::{Checkpoint, CheckpointManager, CheckpointStatus};
-use flow_run::core::types::{StepResult, StepStatus, StepError};
-use chrono::{Utc, Duration as ChronoDuration};
-use std::collections::{HashMap, HashSet};
+use flow_run::core::context::ExecutionContext;
+use flow_run::core::dag::{DagScheduler, Scheduler};
+use flow_run::core::parser::WorkflowParser;
+use flow_run::utils::checkpoint::CheckpointManager;
+use std::collections::HashMap;
+use std::path::Path;
 use tempfile::tempdir;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter("info")
+        .with_env_filter("flow_run=info")
         .init();
 
     println!("==========================================");
-    println!("  flow-run - 高级示例：检查点管理");
+    println!("  flow-run - 中级示例：模板表达式与过滤器");
     println!("==========================================\n");
 
-    // 创建临时目录用于存储检查点
-    let temp_dir = tempdir()?;
-    let checkpoint_dir = temp_dir.path().to_path_buf();
-    println!("[1] 检查点目录: {:?}\n", checkpoint_dir);
+    // 1. 从文件加载工作流
+    let workflow_path = Path::new("examples/06_intermediate_templates.yaml");
+    println!("[1] 从文件加载工作流: {:?}", workflow_path);
+    let workflow = WorkflowParser::from_file(workflow_path)?;
+    println!("    ✅ 加载成功!\n");
 
-    // 创建检查点管理器
-    let manager = CheckpointManager::new(checkpoint_dir)?;
+    // 2. 显示工作流信息
+    println!("[2] 工作流信息:");
+    println!("    名称: {}", workflow.name);
+    println!("    描述: {}", workflow.description.as_deref().unwrap_or("无"));
+    println!("    步骤数: {}\n", workflow.steps.len());
 
-    // 创建检查点
-    println!("[2] 创建检查点:");
-    let mut checkpoint = Checkpoint::new(
-        "workflow-001".to_string(),
-        "测试工作流".to_string(),
-        Utc::now(),
-        ChronoDuration::seconds(300),
-    );
-    println!("    ID: {}", checkpoint.id);
-    println!("    工作流: {}", checkpoint.workflow_name);
-    println!("    状态: {:?}\n", checkpoint.status);
+    // 3. 创建输入参数
+    let username = "alice";
+    let environment = "staging";
+    println!("[3] 输入参数:");
+    println!("    username: {}", username);
+    println!("    environment: {}\n", environment);
 
-    // 模拟步骤执行
-    println!("[3] 模拟步骤执行:");
-    let step1 = StepResult::success("step1", serde_json::json!({"data": "result1"}));
-    let step2 = StepResult::success("step2", serde_json::json!({"data": "result2"}));
-    let step3 = StepResult::failed("step3", StepError {
-        code: "ERROR_001".to_string(),
-        message: "步骤执行失败".to_string(),
-        fix: Some("检查输入参数".to_string()),
-    });
+    let mut inputs = HashMap::new();
+    inputs.insert("username".to_string(), serde_json::json!(username));
+    inputs.insert("environment".to_string(), serde_json::json!(environment));
 
-    checkpoint.mark_step_completed("step1".to_string());
-    checkpoint.mark_step_completed("step2".to_string());
-    checkpoint.mark_step_failed("step3".to_string());
-    checkpoint.record_step_output("step1".to_string(), step1);
-    checkpoint.record_step_output("step2".to_string(), step2);
-    checkpoint.record_step_output("step3".to_string(), step3);
+    // 4. 创建执行上下文
+    println!("[4] 创建执行上下文");
+    let context = ExecutionContext::new(&workflow, inputs);
+    println!("    执行 ID: {}\n", context.execution_id);
 
-    println!("    已完成步骤: {:?}", checkpoint.completed_steps);
-    println!("    失败步骤: {:?}\n", checkpoint.failed_steps);
-
-    // 设置变量
-    println!("[4] 设置变量:");
-    checkpoint.set_variable("version".to_string(), serde_json::json!("1.0.0"));
-    checkpoint.set_variable("env".to_string(), serde_json::json!("production"));
-    println!("    version: {:?}", checkpoint.get_variable("version"));
-    println!("    env: {:?}\n", checkpoint.get_variable("env"));
-
-    // 保存检查点
-    println!("[5] 保存检查点:");
-    let checkpoint_id = manager.save(&mut checkpoint)?;
-    println!("    ✅ 保存成功: {}\n", checkpoint_id);
-
-    // 列出检查点
-    println!("[6] 列出所有检查点:");
-    let checkpoints = manager.list()?;
-    for id in &checkpoints {
-        println!("    - {}", id);
+    // 5. 创建 DAG 调度器
+    println!("[5] DAG 分析:");
+    let dag = DagScheduler::new(workflow.steps.clone())?;
+    match dag.has_cycle() {
+        Ok(false) => println!("    ✅ 无循环依赖"),
+        Ok(true) => {
+            println!("    ❌ 检测到循环依赖!");
+            return Err(anyhow::anyhow!("工作流包含循环依赖"));
+        }
+        Err(e) => {
+            println!("    ❌ 检查失败: {}", e);
+            return Err(e.into());
+        }
     }
     println!();
 
-    // 加载检查点
-    println!("[7] 加载检查点:");
-    let loaded = manager.load(&checkpoint_id)?;
-    println!("    ID: {}", loaded.id);
-    println!("    工作流: {}", loaded.workflow_name);
-    println!("    状态: {:?}", loaded.status);
-    println!("    已完成步骤: {:?}", loaded.completed_steps);
-    println!("    失败步骤: {:?}", loaded.failed_steps);
+    // 6. 创建 Scheduler 并设置上下文
+    println!("[6] 创建 Scheduler");
+    let temp_dir = tempdir()?;
+    let checkpoint_manager = CheckpointManager::new(temp_dir.path().to_path_buf())?;
+    let config = workflow.config.clone().unwrap_or_default();
+    let scheduler = Scheduler::new(dag, config, checkpoint_manager);
+    scheduler.set_context(context).await;
+    println!("    ✅ Scheduler 创建成功\n");
+
+    // 7. 使用 Scheduler 执行工作流
+    println!("[7] 执行工作流...");
+    let result = scheduler.run().await?;
+
+    // 8. 显示执行结果
+    println!("[8] 执行结果:");
+    println!("    状态: {:?}", result.status);
+    println!("    步骤结果:");
+    for step in &result.steps {
+        println!("      - {}: {:?}", step.step_id, step.status);
+        if let Some(output) = &step.output {
+            if let Some(stdout) = output.get("stdout").and_then(|v| v.as_str()) {
+                if !stdout.is_empty() {
+                    println!("        stdout: {}", stdout.replace('\n', " "));
+                }
+            }
+        }
+    }
     println!();
 
-    // 恢复执行（从第 4 步开始）
-    println!("[8] 恢复执行:");
-    let resume_from = loaded.current_batch + 1;
-    println!("    从批次 {} 恢复执行", resume_from);
-    println!("    已有输出: {} 个步骤", loaded.step_outputs.len());
-    println!();
+    // 9. 显示执行指标
+    println!("[9] 执行指标:");
+    println!("    总步骤: {}", result.metrics.total_steps);
+    println!("    成功: {}", result.metrics.success_steps);
+    println!("    失败: {}", result.metrics.failed_steps);
+    println!("    耗时: {}ms\n", result.metrics.total_duration_ms);
 
-    // 更新检查点
-    println!("[9] 更新检查点:");
-    checkpoint.current_batch = 3;
-    checkpoint.status = CheckpointStatus::Running;
-    checkpoint.set_variable("updated".to_string(), serde_json::json!(true));
-    manager.save(&mut checkpoint)?;
-    println!("    ✅ 检查点已更新\n");
-
-    // 删除检查点
-    println!("[10] 删除检查点:");
-    manager.delete(&checkpoint_id)?;
-    println!("    ✅ 检查点已删除\n");
+    // 10. 显示输出
+    if let Some(outputs) = &result.outputs {
+        println!("[10] 工作流输出:");
+        for (key, value) in outputs {
+            println!("    {}: {}", key, value);
+        }
+        println!();
+    }
 
     println!("==========================================");
     println!("  示例完成!");

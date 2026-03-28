@@ -1,124 +1,126 @@
-//! 中级示例 - 重试引擎
+//! 中级示例 - 错误处理与重试
 //!
 //! 这个示例展示如何：
-//! - 创建重试策略
-//! - 执行带重试的操作
-//! - 使用不同的退避策略
+//! - 加载带重试配置的工作流
+//! - 使用 Scheduler 执行工作流
+//! - 观察重试机制和错误处理
 
-use flow_run::core::types::BackoffStrategy;
-use flow_run::utils::retry::{RetryEngine, RetryPolicy};
-use flow_run::utils::error::RetryError;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::Duration;
+use flow_run::core::context::ExecutionContext;
+use flow_run::core::dag::{DagScheduler, Scheduler};
+use flow_run::core::parser::WorkflowParser;
+use flow_run::utils::checkpoint::CheckpointManager;
+use std::collections::HashMap;
+use std::path::Path;
+use tempfile::tempdir;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter("info")
+        .with_env_filter("flow_run=info")
         .init();
 
     println!("==========================================");
-    println!("  flow-run - 中级示例：重试引擎");
+    println!("  flow-run - 中级示例：错误处理与重试");
     println!("==========================================\n");
 
-    // 示例 1：固定延迟重试
-    println!("[1] 固定延迟重试策略:");
-    let policy1 = RetryPolicy {
-        max_attempts: 3,
-        strategy: BackoffStrategy::Fixed,
-        initial_delay: Duration::from_millis(100),
-        max_delay: Duration::from_secs(5),
-        jitter: false,
-        retryable_status_codes: vec![500, 502, 503],
-        retryable_errors: vec!["NetworkError".to_string()],
-    };
-    let engine1 = RetryEngine::new(policy1);
-    let counter1 = Arc::new(AtomicU32::new(0));
-    let counter1_clone = counter1.clone();
+    // 1. 从文件加载工作流
+    let workflow_path = Path::new("examples/05_intermediate_retry.yaml");
+    println!("[1] 从文件加载工作流: {:?}", workflow_path);
+    let workflow = WorkflowParser::from_file(workflow_path)?;
+    println!("    ✅ 加载成功!\n");
 
-    let result1 = engine1.execute(move || {
-        let counter = counter1_clone.clone();
-        async move {
-            let attempt = counter.fetch_add(1, Ordering::SeqCst) + 1;
-            println!("    尝试 #{}", attempt);
-            if attempt < 3 {
-                Err(RetryError::HttpStatus(500))
-            } else {
-                Ok::<String, RetryError>("成功!".to_string())
+    // 2. 显示工作流信息
+    println!("[2] 工作流信息:");
+    println!("    名称: {}", workflow.name);
+    println!("    描述: {}", workflow.description.as_deref().unwrap_or("无"));
+    println!("    步骤数: {}\n", workflow.steps.len());
+
+    // 3. 显示步骤配置
+    println!("[3] 步骤配置:");
+    for step in &workflow.steps {
+        println!("    - {} ({})", step.id, serde_json::to_string(&step.r#type).unwrap_or_default());
+        if let Some(retry) = &step.retry {
+            println!("      重试: {} 次, 策略: {:?}", retry.max_attempts, retry.strategy);
+        }
+        if let Some(timeout) = &step.timeout {
+            println!("      超时: {}", timeout);
+        }
+    }
+    println!();
+
+    // 4. 创建 DAG 调度器
+    println!("[4] DAG 分析:");
+    let dag = DagScheduler::new(workflow.steps.clone())?;
+    match dag.has_cycle() {
+        Ok(false) => println!("    ✅ 无循环依赖"),
+        Ok(true) => {
+            println!("    ❌ 检测到循环依赖!");
+            return Err(anyhow::anyhow!("工作流包含循环依赖"));
+        }
+        Err(e) => {
+            println!("    ❌ 检查失败: {}", e);
+            return Err(e.into());
+        }
+    }
+    println!();
+
+    // 5. 创建执行上下文
+    println!("[5] 创建执行上下文");
+    let context = ExecutionContext::new(&workflow, HashMap::new());
+    println!("    执行 ID: {}\n", context.execution_id);
+
+    // 6. 创建 Scheduler 并设置上下文
+    println!("[6] 创建 Scheduler");
+    let temp_dir = tempdir()?;
+    let checkpoint_manager = CheckpointManager::new(temp_dir.path().to_path_buf())?;
+    let config = workflow.config.clone().unwrap_or_default();
+    let scheduler = Scheduler::new(dag, config, checkpoint_manager);
+    scheduler.set_context(context).await;
+    println!("    ✅ Scheduler 创建成功\n");
+
+    // 7. 使用 Scheduler 执行工作流
+    println!("[7] 执行工作流...");
+    let result = scheduler.run().await?;
+
+    // 8. 显示执行结果
+    println!("[8] 执行结果:");
+    println!("    状态: {:?}", result.status);
+    println!("    步骤结果:");
+    for step in &result.steps {
+        println!("      - {}: {:?}", step.step_id, step.status);
+        if let Some(output) = &step.output {
+            if let Some(stdout) = output.get("stdout").and_then(|v| v.as_str()) {
+                if !stdout.is_empty() {
+                    println!("        stdout: {}", stdout.trim());
+                }
+            }
+            if let Some(body) = output.get("response").and_then(|r| r.get("body")) {
+                if let Some(title) = body.get("title").and_then(|t| t.as_str()) {
+                    println!("        title: {}", title);
+                }
             }
         }
-    }).await;
-
-    println!("    结果: {:?}\n", result1);
-
-    // 示例 2：指数退避重试
-    println!("[2] 指数退避重试策略:");
-    let policy2 = RetryPolicy {
-        max_attempts: 4,
-        strategy: BackoffStrategy::Exponential { factor: Some(2.0) },
-        initial_delay: Duration::from_millis(50),
-        max_delay: Duration::from_secs(1),
-        jitter: true,
-        retryable_status_codes: vec![500],
-        retryable_errors: vec![],
-    };
-    let engine2 = RetryEngine::new(policy2);
-
-    // 显示延迟计算
-    println!("    延迟计算:");
-    for attempt in 0..4 {
-        let delay = engine2.calculate_delay(attempt);
-        println!("    尝试 #{} 延迟: {:?}", attempt + 1, delay);
-    }
-    println!();
-
-    // 示例 3：斐波那契退避
-    println!("[3] 斐波那契退避策略:");
-    let policy3 = RetryPolicy {
-        max_attempts: 5,
-        strategy: BackoffStrategy::Fibonacci,
-        initial_delay: Duration::from_millis(10),
-        max_delay: Duration::from_secs(1),
-        jitter: false,
-        retryable_status_codes: vec![],
-        retryable_errors: vec![],
-    };
-    let engine3 = RetryEngine::new(policy3);
-
-    println!("    延迟计算:");
-    for attempt in 0..5 {
-        let delay = engine3.calculate_delay(attempt);
-        println!("    尝试 #{} 延迟: {:?}", attempt + 1, delay);
-    }
-    println!();
-
-    // 示例 4：不可重试的错误
-    println!("[4] 不可重试的错误:");
-    let policy4 = RetryPolicy {
-        max_attempts: 3,
-        strategy: BackoffStrategy::Fixed,
-        initial_delay: Duration::from_millis(10),
-        max_delay: Duration::from_secs(1),
-        jitter: false,
-        retryable_status_codes: vec![500], // 只重试 500
-        retryable_errors: vec![],
-    };
-    let engine4 = RetryEngine::new(policy4);
-    let counter4 = Arc::new(AtomicU32::new(0));
-    let counter4_clone = counter4.clone();
-
-    let result4 = engine4.execute(move || {
-        let counter = counter4_clone.clone();
-        async move {
-            let attempt = counter.fetch_add(1, Ordering::SeqCst) + 1;
-            println!("    尝试 #{}", attempt);
-            Err::<(), RetryError>(RetryError::HttpStatus(404)) // 404 不可重试
+        if let Some(error) = &step.error {
+            println!("        错误: {}", error.message);
         }
-    }).await;
+    }
+    println!();
 
-    println!("    结果: {:?}", result4);
-    println!("    总尝试次数: {}\n", counter4.load(Ordering::SeqCst));
+    // 9. 显示执行指标
+    println!("[9] 执行指标:");
+    println!("    总步骤: {}", result.metrics.total_steps);
+    println!("    成功: {}", result.metrics.success_steps);
+    println!("    失败: {}", result.metrics.failed_steps);
+    println!("    耗时: {}ms\n", result.metrics.total_duration_ms);
+
+    // 10. 显示输出
+    if let Some(outputs) = &result.outputs {
+        println!("[10] 工作流输出:");
+        for (key, value) in outputs {
+            println!("    {}: {}", key, value);
+        }
+        println!();
+    }
 
     println!("==========================================");
     println!("  示例完成!");

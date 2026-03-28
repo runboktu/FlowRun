@@ -26,6 +26,8 @@ pub struct WorkflowDefinition {
     pub on: Option<HooksConfig>,
     /// 触发器配置
     pub trigger: Option<Vec<TriggerConfig>>,
+    /// 工作流变量
+    pub variables: Option<HashMap<String, serde_json::Value>>,
 }
 
 /// 工作流全局配置

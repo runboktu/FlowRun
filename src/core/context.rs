@@ -73,6 +73,9 @@ impl ExecutionContext {
         // 生成唯一的执行 ID
         let execution_id = Uuid::new_v4().to_string();
 
+        // 从工作流定义中获取变量
+        let variables = workflow.variables.clone().unwrap_or_default();
+
         Self {
             workflow_id,
             workflow_name: workflow.name.clone(),
@@ -82,7 +85,7 @@ impl ExecutionContext {
             step_outputs: HashMap::new(),
             completed_steps: HashSet::new(),
             failed_steps: HashSet::new(),
-            variables: HashMap::new(),
+            variables,
             current_batch: 0,
         }
     }

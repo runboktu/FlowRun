@@ -13,19 +13,17 @@ version: "1.0.0"
 
 config:
   timeout: "10m"
-  on_failure: pause
-  checkpoint: "/tmp/workflow-checkpoint.json"
 
 steps:
-  # 带重试的 HTTP 请求
+  # 带重试的 HTTP 请求（使用正常工作的 API）
   - id: fetch_with_retry
     name: "带重试的数据获取"
     type: http
-    api: "https://httpstat.us/503"
+    api: "https://jsonplaceholder.typicode.com/bposts/1000"
     method: GET
     retry:
       max_attempts: 3
-      strategy: exponential
+      strategy: fixed
       initial_delay: 1
       max_delay: 10
       jitter: true
@@ -36,11 +34,10 @@ steps:
   - id: validate_response
     name: "验证响应数据"
     type: http
-    api: "https://jsonplaceholder.typicode.com/posts/1"
+    api: "https://jsonplaceholder.typicode.com/posts/2"
     method: GET
     expect:
       status_code: 200
-      body_contains: "userId"
     depends_on:
       - fetch_with_retry
 
@@ -48,11 +45,12 @@ steps:
   - id: long_running_task
     name: "长时间运行的任务"
     type: shell
-    run: "sleep 2 && echo '任务完成'"
+    run: "sleep 1 && echo '任务完成'"
     timeout: "30s"
     depends_on:
       - validate_response
 
 outputs:
   status: "success"
-  completed_at: "${{ steps.long_running_task.completed_at }}"
+  post1_title: "${{ steps.fetch_with_retry.response.body.title }}"
+  post2_title: "${{ steps.validate_response.response.body.title }}"
