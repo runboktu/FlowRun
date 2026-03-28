@@ -1,4 +1,5 @@
 use crate::core::context::ExecutionContext;
+use crate::core::template::TemplateEngine;
 use crate::core::types::*;
 use crate::utils::error::WorkflowError;
 use std::collections::HashMap;
@@ -137,6 +138,10 @@ impl ApproveExecutor {
             store: Arc::new(InMemoryApprovalStore::new()),
             notifier: Arc::new(SimpleApprovalNotifier),
         }
+    }
+
+    pub fn store(&self) -> Arc<dyn ApprovalStore> {
+        Arc::clone(&self.store)
     }
 
     /// 创建带自定义存储和通知器的审批执行器
@@ -417,7 +422,29 @@ impl ApproveExecutor {
         condition: &str,
         context: &ExecutionContext,
     ) -> Result<bool, WorkflowError> {
-        let value = context.evaluate(condition)?;
+        let mut template_ctx = HashMap::new();
+        template_ctx.insert("inputs".to_string(), serde_json::to_value(&context.inputs).unwrap_or_default());
+        template_ctx.insert("variables".to_string(), serde_json::to_value(&context.variables).unwrap_or_default());
+
+        let steps_map: HashMap<String, serde_json::Value> = context
+            .step_outputs
+            .iter()
+            .map(|(k, v)| (k.clone(), serde_json::to_value(v).unwrap_or_default()))
+            .collect();
+        template_ctx.insert("steps".to_string(), serde_json::json!(steps_map));
+
+        let engine = TemplateEngine::new();
+
+        let condition = condition.trim();
+        let condition = if condition.starts_with("${{") && condition.ends_with("}}") {
+            &condition[3..condition.len() - 2]
+        } else {
+            condition
+        };
+
+        let value = engine.evaluate(condition, &template_ctx).map_err(|e| {
+            WorkflowError::Other(format!("条件求值失败: {}", e))
+        })?;
 
         match value {
             serde_json::Value::Bool(b) => Ok(b),

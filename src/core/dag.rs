@@ -179,6 +179,10 @@ impl Scheduler {
         *ctx = context;
     }
 
+    pub fn set_approve_executor(&mut self, executor: ApproveExecutor) {
+        self.approve_executor = Arc::new(executor);
+    }
+
     pub fn with_workflow_executor(
         dag: DagScheduler,
         config: WorkflowConfig,

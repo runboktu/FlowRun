@@ -96,5 +96,9 @@ name = "09_subworkflow"
 path = "examples/code/09_subworkflow.rs"
 
 [[example]]
+name = "10_advanced_approval"
+path = "examples/code/10_advanced_approval.rs"
+
+[[example]]
 name = "11_comprehensive_cicd"
 path = "examples/code/11_comprehensive_cicd.rs"

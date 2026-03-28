@@ -1,17 +1,22 @@
-//! 综合示例 - 加载运行完整 CI/CD 工作流
+//! 高级示例 - 加载运行人工审批工作流
 //!
 //! 这个示例展示如何：
-//! - 加载复杂的 CI/CD 工作流定义
-//! - 传入多个输入参数（仓库地址、分支、部署环境等）
+//! - 加载包含审批步骤的工作流
+//! - 传入风险等级等输入参数
+//! - 低风险自动通过审批
+//! - 高风险时通过共享存储模拟人工审批
 //! - 创建 DAG 调度器并执行
-//! - 查看执行结果和输出
 
 use flow_run::core::context::ExecutionContext;
 use flow_run::core::dag::{DagScheduler, Scheduler};
 use flow_run::core::parser::WorkflowParser;
+use flow_run::core::types::ApprovalStatus;
+use flow_run::executors::approve::{ApproveExecutor, ApprovalStore, InMemoryApprovalStore};
 use flow_run::utils::checkpoint::CheckpointManager;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
 use tempfile::tempdir;
 
 #[tokio::main]
@@ -21,10 +26,10 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     println!("==========================================");
-    println!("  flow-run - 综合示例：完整 CI/CD 流水线");
+    println!("  flow-run - 高级示例：人工审批流程");
     println!("==========================================\n");
 
-    let workflow_path = Path::new("examples/11_comprehensive_cicd.yaml");
+    let workflow_path = Path::new("examples/10_advanced_approval.yaml");
     println!("[1] 从文件加载工作流：{:?}", workflow_path);
     let workflow = WorkflowParser::from_file(workflow_path)?;
     println!("    ✅ 加载成功!\n");
@@ -55,20 +60,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     println!("[4] 输入参数值:");
-    let repo_url = "https://github.com/example/myapp.git";
-    let branch = "main";
-    let deploy_env = "staging";
-    let skip_tests = false;
-    println!("    repo_url: {}", repo_url);
-    println!("    branch: {}", branch);
-    println!("    deploy_env: {}", deploy_env);
-    println!("    skip_tests: {}\n", skip_tests);
+    let change_request_id = "CR-2024-042";
+    let risk_level = "high";
+    println!("    change_request_id: {}", change_request_id);
+    println!("    risk_level: {} (高风险，需要人工审批)\n", risk_level);
 
     let mut inputs = HashMap::new();
-    inputs.insert("repo_url".to_string(), serde_json::json!(repo_url));
-    inputs.insert("branch".to_string(), serde_json::json!(branch));
-    inputs.insert("deploy_env".to_string(), serde_json::json!(deploy_env));
-    inputs.insert("skip_tests".to_string(), serde_json::json!(skip_tests));
+    inputs.insert("change_request_id".to_string(), serde_json::json!(change_request_id));
+    inputs.insert("risk_level".to_string(), serde_json::json!(risk_level));
 
     println!("[5] 创建执行上下文");
     let context = ExecutionContext::new(&workflow, inputs);
@@ -78,16 +77,47 @@ async fn main() -> anyhow::Result<()> {
     let dag = DagScheduler::new(workflow.steps.clone())?;
     println!("    ✅ DAG 创建成功 ({} 个步骤)\n", workflow.steps.len());
 
+    // 创建共享审批存储，用于模拟人工审批
+    let approval_store = Arc::new(InMemoryApprovalStore::new());
+    let approve_executor = ApproveExecutor::with_components(
+        approval_store.clone(),
+        Arc::new(flow_run::executors::approve::SimpleApprovalNotifier),
+    );
+
     println!("[7] 创建 Scheduler");
     let temp_dir = tempdir()?;
     let checkpoint_manager = CheckpointManager::new(temp_dir.path().to_path_buf())?;
     let workflow_config = workflow.config.clone().unwrap_or_default();
-    let scheduler = Scheduler::new(dag, workflow_config, checkpoint_manager);
+    let mut scheduler = Scheduler::new(dag, workflow_config, checkpoint_manager);
     scheduler.set_context(context).await;
+    scheduler.set_approve_executor(approve_executor);
+    if let Some(outputs) = &workflow.outputs {
+        let outputs_map: HashMap<String, String> = outputs
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        scheduler.set_outputs(outputs_map).await;
+    }
     println!("    ✅ Scheduler 创建成功\n");
 
+    // 启动异步任务：2 秒后模拟人工批准
+    let store_clone = approval_store.clone();
+    let step_id = "approval_gate".to_string();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        store_clone
+            .save_approval(
+                &step_id,
+                ApprovalStatus::Approved,
+                Some("admin@example.com".to_string()),
+                Some("审批通过：变更合理，同意执行".to_string()),
+            )
+            .await
+            .ok();
+    });
+
     println!("[8] 执行工作流...");
-    println!("    -> CI/CD 流水线启动...\n");
+    println!("    -> 审批流程启动（高风险，等待人工审批，2 秒后自动批准）...\n");
     let result = scheduler.run().await?;
 
     println!("[9] 执行结果:");
