@@ -86,3 +86,7 @@ path = "examples/code/06_checkpoint.rs"
 [[example]]
 name = "07_full_execution"
 path = "examples/code/07_full_execution.rs"
+
+[[example]]
+name = "08_condition_branch"
+path = "examples/code/08_condition_branch.rs"

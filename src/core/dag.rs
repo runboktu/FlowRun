@@ -738,23 +738,52 @@ impl Scheduler {
         workflow_executor: Arc<WorkflowExecutor>,
         approve_executor: Arc<ApproveExecutor>,
     ) -> Result<StepResult, WorkflowError> {
-        let _expression = step_def.expression.as_ref().ok_or_else(|| {
+        let expression = step_def.expression.as_ref().ok_or_else(|| {
             WorkflowError::Other(format!("步骤 {} 缺少条件表达式", step_def.id))
         })?;
 
         let then_steps = step_def.then_steps.as_deref().unwrap_or(&[]);
-        let _else_steps = step_def.else_steps.as_deref().unwrap_or(&[]);
+        let else_steps = step_def.else_steps.as_deref().unwrap_or(&[]);
 
-        let selected_steps = then_steps;
+        // 评估条件表达式
+        let ctx = context.read().await;
+        let template_engine = crate::core::template::TemplateEngine::new();
+        let mut template_ctx = HashMap::new();
+        template_ctx.insert(
+            "variables".to_string(),
+            serde_json::to_value(&ctx.variables).unwrap_or_default(),
+        );
+        template_ctx.insert(
+            "inputs".to_string(),
+            serde_json::to_value(&ctx.inputs).unwrap_or_default(),
+        );
+        let condition_result = template_engine.evaluate(expression, &template_ctx)
+            .unwrap_or(serde_json::Value::Bool(false));
+        drop(ctx);
+
+        // 检查条件是否为真
+        let is_true = condition_result.as_bool().unwrap_or(false)
+            || condition_result.as_i64().map(|v| v != 0).unwrap_or(false)
+            || condition_result.as_str().map(|s| s != "false" && s != "0" && !s.is_empty()).unwrap_or(false);
+
+        let selected_steps = if is_true { then_steps } else { else_steps };
+        let branch_name = if is_true { "then" } else { "else" };
 
         let mut results = Vec::new();
         for sub_step in selected_steps {
-            let result = Self::execute_step(sub_step, context, workflow_executor.clone(), approve_executor.clone()).await?;
+            let result = Self::execute_step(
+                sub_step,
+                context,
+                workflow_executor.clone(),
+                approve_executor.clone(),
+            ).await?;
             results.push(result);
         }
 
         let output = serde_json::json!({
-            "branch": "then",
+            "branch": branch_name,
+            "condition": expression,
+            "result": is_true,
             "results": results.iter().map(|r| &r.output).collect::<Vec<_>>()
         });
 
