@@ -7,27 +7,21 @@ use std::ops::Fn;
 /// 重试策略配置
 #[derive(Debug, Clone)]
 pub struct RetryPolicy {
-    /// 最大重试次数
     pub max_attempts: u32,
-    /// 退避策略
     pub strategy: BackoffStrategy,
-    /// 初始延迟
     pub initial_delay: Duration,
-    /// 最大延迟
     pub max_delay: Duration,
-    /// 是否启用抖动
     pub jitter: bool,
-    /// 可重试的 HTTP 状态码
     pub retryable_status_codes: Vec<u16>,
-    /// 可重试的错误类型
     pub retryable_errors: Vec<String>,
+    pub factor: f64,
 }
 
 impl Default for RetryPolicy {
     fn default() -> Self {
         Self {
             max_attempts: 3,
-            strategy: BackoffStrategy::Exponential { factor: Some(2.0) },
+            strategy: BackoffStrategy::Exponential,
             initial_delay: Duration::from_millis(1000),
             max_delay: Duration::from_secs(30),
             jitter: true,
@@ -37,6 +31,7 @@ impl Default for RetryPolicy {
                 "Timeout".to_string(),
                 "ConnectionReset".to_string(),
             ],
+            factor: 2.0,
         }
     }
 }
@@ -129,9 +124,8 @@ impl RetryEngine {
     pub fn calculate_delay(&self, attempt: u32) -> Duration {
         let base_delay = match &self.policy.strategy {
             BackoffStrategy::Fixed => self.policy.initial_delay,
-            BackoffStrategy::Exponential { factor } => {
-                let factor = factor.unwrap_or(2.0);
-                let multiplier = factor.powi(attempt as i32);
+            BackoffStrategy::Exponential => {
+                let multiplier = self.policy.factor.powi(attempt as i32);
                 let delay_ms = self.policy.initial_delay.as_millis() as f64 * multiplier;
                 Duration::from_millis(delay_ms as u64)
             }
@@ -240,6 +234,7 @@ mod tests {
             jitter: false,
             retryable_status_codes: vec![],
             retryable_errors: vec![],
+            factor: 2.0,
         };
         let engine = RetryEngine::new(policy);
 
@@ -252,12 +247,13 @@ mod tests {
     fn test_calculate_delay_exponential() {
         let policy = RetryPolicy {
             max_attempts: 3,
-            strategy: BackoffStrategy::Exponential { factor: Some(2.0) },
+            strategy: BackoffStrategy::Exponential,
             initial_delay: Duration::from_millis(1000),
             max_delay: Duration::from_secs(30),
             jitter: false,
             retryable_status_codes: vec![],
             retryable_errors: vec![],
+            factor: 2.0,
         };
         let engine = RetryEngine::new(policy);
 
@@ -276,6 +272,7 @@ mod tests {
             jitter: false,
             retryable_status_codes: vec![],
             retryable_errors: vec![],
+            factor: 2.0,
         };
         let engine = RetryEngine::new(policy);
 
@@ -289,18 +286,18 @@ mod tests {
     fn test_max_delay_limit() {
         let policy = RetryPolicy {
             max_attempts: 10,
-            strategy: BackoffStrategy::Exponential { factor: Some(10.0) },
+            strategy: BackoffStrategy::Exponential,
             initial_delay: Duration::from_millis(1000),
-            max_delay: Duration::from_millis(5000), // 小的最大延迟
+            max_delay: Duration::from_millis(5000),
             jitter: false,
             retryable_status_codes: vec![],
             retryable_errors: vec![],
+            factor: 10.0,
         };
         let engine = RetryEngine::new(policy);
 
-        // 即使指数增长很快，也不会超过最大延迟
         assert_eq!(engine.calculate_delay(0), Duration::from_millis(1000));
-        assert_eq!(engine.calculate_delay(1), Duration::from_millis(5000)); // 被 max_delay 限制
+        assert_eq!(engine.calculate_delay(1), Duration::from_millis(5000));
         assert_eq!(engine.calculate_delay(2), Duration::from_millis(5000));
     }
 
@@ -314,23 +311,17 @@ mod tests {
             jitter: false,
             retryable_status_codes: vec![500, 503],
             retryable_errors: vec!["NetworkError".to_string()],
+            factor: 2.0,
         };
         let engine = RetryEngine::new(policy);
 
-        // 可重试的 HTTP 状态码
         assert!(engine.is_retryable(&RetryError::HttpStatus(500)));
         assert!(engine.is_retryable(&RetryError::HttpStatus(503)));
-
-        // 不可重试的 HTTP 状态码
         assert!(!engine.is_retryable(&RetryError::HttpStatus(404)));
         assert!(!engine.is_retryable(&RetryError::HttpStatus(400)));
-
-        // 可重试的网络错误
         assert!(engine.is_retryable(&RetryError::Network(
             "ConnectionReset NetworkError".to_string()
         )));
-
-        // 不可重试的错误
         assert!(!engine.is_retryable(&RetryError::MaxAttemptsExceeded));
         assert!(!engine.is_retryable(&RetryError::NotRetryable("InvalidConfig".to_string())));
     }
@@ -369,6 +360,7 @@ mod tests {
             jitter: false,
             retryable_status_codes: vec![500],
             retryable_errors: vec![],
+            factor: 2.0,
         });
         let counter = Arc::new(AtomicU32::new(0));
         let counter_clone = counter.clone();
@@ -402,6 +394,7 @@ mod tests {
             jitter: false,
             retryable_status_codes: vec![500],
             retryable_errors: vec![],
+            factor: 2.0,
         });
         let counter = Arc::new(AtomicU32::new(0));
         let counter_clone = counter.clone();
@@ -415,7 +408,7 @@ mod tests {
         }).await;
 
         assert_eq!(result, Err(RetryError::HttpStatus(500)));
-        assert_eq!(counter.load(Ordering::SeqCst), 2); // 尝试了 max_attempts 次
+        assert_eq!(counter.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]
@@ -431,6 +424,7 @@ mod tests {
             jitter: false,
             retryable_status_codes: vec![500],
             retryable_errors: vec![],
+            factor: 2.0,
         });
         let counter = Arc::new(AtomicU32::new(0));
         let counter_clone = counter.clone();
@@ -439,11 +433,11 @@ mod tests {
             let counter = counter_clone.clone();
             async move {
                 counter.fetch_add(1, Ordering::SeqCst);
-                Err::<i32, RetryError>(RetryError::HttpStatus(404)) // 不可重试
+                Err::<i32, RetryError>(RetryError::HttpStatus(404))
             }
         }).await;
 
         assert_eq!(result, Err(RetryError::HttpStatus(404)));
-        assert_eq!(counter.load(Ordering::SeqCst), 1); // 只尝试一次
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
     }
 }

@@ -377,17 +377,15 @@ impl HttpExecutor {
     ///
     /// 返回延迟时间（毫秒）
     fn calculate_retry_delay(&self, retry_config: &RetryConfig, attempt: u32) -> f64 {
-        let strategy = retry_config.strategy.as_ref().unwrap_or(&BackoffStrategy::Exponential {
-            factor: Some(2.0),
-        });
+        let strategy = retry_config.strategy.as_ref().unwrap_or(&BackoffStrategy::Exponential);
 
-        let initial_delay = retry_config.initial_delay.unwrap_or(1.0); // 默认 1 秒
-        let max_delay = retry_config.max_delay.unwrap_or(30.0); // 默认 30 秒
+        let initial_delay = retry_config.initial_delay.unwrap_or(1.0);
+        let max_delay = retry_config.max_delay.unwrap_or(30.0);
+        let factor = retry_config.factor.unwrap_or(2.0);
 
         let delay = match strategy {
             BackoffStrategy::Fixed => initial_delay,
-            BackoffStrategy::Exponential { factor } => {
-                let factor = factor.unwrap_or(2.0);
+            BackoffStrategy::Exponential => {
                 initial_delay * factor.powi((attempt - 1) as i32)
             }
             BackoffStrategy::Fibonacci => {
@@ -642,10 +640,11 @@ mod tests {
 
         let retry_config = RetryConfig {
             max_attempts: 3,
-            strategy: Some(BackoffStrategy::Exponential { factor: Some(2.0) }),
+            strategy: Some(BackoffStrategy::Exponential),
             initial_delay: Some(1.0),
             max_delay: Some(30.0),
             jitter: None,
+            factor: Some(2.0),
         };
 
         let delay1 = executor.calculate_retry_delay(&retry_config, 1);

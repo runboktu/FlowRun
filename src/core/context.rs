@@ -158,14 +158,20 @@ impl ExecutionContext {
             return self.resolve_path(trimmed);
         }
 
+        // 检查是否为引号字符串
+        if (trimmed.starts_with('"') && trimmed.ends_with('"'))
+            || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+        {
+            return Ok(Value::String(trimmed[1..trimmed.len() - 1].to_string()));
+        }
+
         // 直接作为变量名查找
         if let Some(value) = self.get_variable(trimmed) {
             return Ok(value);
         }
 
-        Err(WorkflowError::UndefinedVariable {
-            variable: trimmed.to_string(),
-        })
+        // 如果不是变量，返回原始字符串作为字面量
+        Ok(Value::String(trimmed.to_string()))
     }
 
     /// 获取变量值

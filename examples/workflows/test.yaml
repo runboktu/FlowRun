@@ -1,0 +1,50 @@
+# 子工作流 - 测试
+
+name: "test-workflow"
+description: "测试子工作流"
+
+version: "1.0.0"
+
+inputs:
+  - name: project
+    type: string
+    required: true
+  - name: test_type
+    type: string
+    required: false
+    default: "all"
+
+steps:
+  - id: setup_test
+    name: "设置测试环境"
+    type: shell
+    run: "echo '设置测试环境: ${{ inputs.project }}'"
+
+  - id: run_unit_tests
+    name: "运行单元测试"
+    type: shell
+    run: |
+      echo "运行 ${{ inputs.test_type }} 测试"
+      echo "项目: ${{ inputs.project }}"
+      echo "单元测试通过: 50/50"
+    depends_on:
+      - setup_test
+
+  - id: run_integration_tests
+    name: "运行集成测试"
+    type: shell
+    run: "echo '集成测试通过: 20/20'"
+    depends_on:
+      - run_unit_tests
+
+  - id: generate_report
+    name: "生成测试报告"
+    type: shell
+    run: "echo '测试报告已生成: /tmp/${{ inputs.project }}/report.html'"
+    depends_on:
+      - run_integration_tests
+
+outputs:
+  report_url: "/tmp/${{ inputs.project }}/report.html"
+  test_status: "passed"
+  total_tests: "70"

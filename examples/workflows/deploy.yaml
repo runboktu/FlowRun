@@ -1,0 +1,47 @@
+# 子工作流 - 部署
+
+name: "deploy-workflow"
+description: "部署子工作流"
+
+version: "1.0.0"
+
+inputs:
+  - name: project
+    type: string
+    required: true
+  - name: environment
+    type: string
+    required: true
+  - name: artifact_path
+    type: string
+    required: true
+
+steps:
+  - id: pre_deploy
+    name: "部署前检查"
+    type: shell
+    run: |
+      echo "检查部署环境: ${{ inputs.environment }}"
+      echo "项目: ${{ inputs.project }}"
+      echo "产物路径: ${{ inputs.artifact_path }}"
+
+  - id: deploy_app
+    name: "执行部署"
+    type: shell
+    run: |
+      echo "开始部署到 ${{ inputs.environment }}..."
+      echo "上传产物: ${{ inputs.artifact_path }}"
+      echo "部署完成!"
+    depends_on:
+      - pre_deploy
+
+  - id: verify_deploy
+    name: "验证部署"
+    type: shell
+    run: "echo '部署验证通过: https://${{ inputs.environment }}.example.com'"
+    depends_on:
+      - deploy_app
+
+outputs:
+  deployment_url: "https://${{ inputs.environment }}.example.com"
+  deploy_status: "success"

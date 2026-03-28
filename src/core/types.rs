@@ -85,6 +85,8 @@ pub struct RetryConfig {
     pub max_delay: Option<f64>,
     /// 是否启用抖动
     pub jitter: Option<bool>,
+    /// 指数退避因子（仅 exponential 策略生效）
+    pub factor: Option<f64>,
 }
 
 /// 退避策略枚举
@@ -94,7 +96,7 @@ pub enum BackoffStrategy {
     /// 固定延迟
     Fixed,
     /// 指数退避
-    Exponential { factor: Option<f64> },
+    Exponential,
     /// 斐波那契退避
     Fibonacci,
 }

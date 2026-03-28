@@ -24,7 +24,7 @@ steps:
   - id: build_step
     name: "执行构建"
     type: workflow
-    workflow: "workflows/build.yaml"
+    workflow: "examples/workflows/build.yaml"
     inputs:
       project: "${{ inputs.project_name }}"
       optimize: "true"
@@ -34,7 +34,7 @@ steps:
   - id: test_step
     name: "执行测试"
     type: workflow
-    workflow: "workflows/test.yaml"
+    workflow: "examples/workflows/test.yaml"
     inputs:
       project: "${{ inputs.project_name }}"
       test_type: "all"
@@ -46,7 +46,7 @@ steps:
   - id: deploy_step
     name: "执行部署"
     type: workflow
-    workflow: "workflows/deploy.yaml"
+    workflow: "examples/workflows/deploy.yaml"
     inputs:
       project: "${{ inputs.project_name }}"
       environment: "${{ inputs.deploy_env }}"

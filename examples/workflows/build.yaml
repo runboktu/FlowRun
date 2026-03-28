@@ -1,0 +1,41 @@
+# 子工作流 - 构建
+
+name: "build-workflow"
+description: "构建项目子工作流"
+
+version: "1.0.0"
+
+inputs:
+  - name: project
+    type: string
+    required: true
+  - name: optimize
+    type: string
+    required: false
+    default: "false"
+
+steps:
+  - id: prepare_build
+    name: "准备构建环境"
+    type: shell
+    run: "echo '准备构建环境: ${{ inputs.project }}'"
+
+  - id: compile
+    name: "编译代码"
+    type: shell
+    run: |
+      echo "编译项目: ${{ inputs.project }}"
+      echo "优化模式: ${{ inputs.optimize }}"
+    depends_on:
+      - prepare_build
+
+  - id: package
+    name: "打包产物"
+    type: shell
+    run: "echo '打包完成: /tmp/${{ inputs.project }}/dist'"
+    depends_on:
+      - compile
+
+outputs:
+  artifact_path: "/tmp/${{ inputs.project }}/dist"
+  build_status: "success"

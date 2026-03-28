@@ -148,6 +148,7 @@ pub struct Scheduler {
     checkpoint_manager: CheckpointManager,
     workflow_executor: Arc<WorkflowExecutor>,
     approve_executor: Arc<ApproveExecutor>,
+    workflow_outputs: Arc<RwLock<Option<HashMap<String, String>>>>,
 }
 
 impl Scheduler {
@@ -156,7 +157,6 @@ impl Scheduler {
         config: WorkflowConfig,
         checkpoint_manager: CheckpointManager,
     ) -> Self {
-        // 创建一个空的调度器，稍后初始化 workflow_executor
         Self {
             dag,
             context: Arc::new(RwLock::new(ExecutionContext::empty())),
@@ -164,7 +164,13 @@ impl Scheduler {
             checkpoint_manager,
             workflow_executor: Arc::new(WorkflowExecutor::new(Arc::new(NullWorkflowRunner))),
             approve_executor: Arc::new(ApproveExecutor::new()),
+            workflow_outputs: Arc::new(RwLock::new(None)),
         }
+    }
+
+    pub async fn set_outputs(&self, outputs: HashMap<String, String>) {
+        let mut wo = self.workflow_outputs.write().await;
+        *wo = Some(outputs);
     }
 
     /// 设置执行上下文
@@ -186,6 +192,7 @@ impl Scheduler {
             checkpoint_manager,
             workflow_executor,
             approve_executor: Arc::new(ApproveExecutor::new()),
+            workflow_outputs: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -252,11 +259,11 @@ impl Scheduler {
                     match on_failure {
                         OnFailureStrategy::Abort => {
                             errors.extend(batch_errors);
-                            return self.build_result(execution_id, start_time, all_results, errors);
+                            return self.build_result(execution_id, start_time, all_results, errors).await;
                         }
                         OnFailureStrategy::Pause => {
                             errors.extend(batch_errors);
-                            return self.build_result(execution_id, start_time, all_results, errors);
+                            return self.build_result(execution_id, start_time, all_results, errors).await;
                         }
                         OnFailureStrategy::Continue => {
                             errors.extend(batch_errors);
@@ -266,7 +273,7 @@ impl Scheduler {
             }
         }
 
-        self.build_result(execution_id, start_time, all_results, errors)
+        self.build_result(execution_id, start_time, all_results, errors).await
     }
 
     async fn execute_batch(&self, batch: &[StepId]) -> Result<Vec<StepResult>, WorkflowError> {
@@ -876,10 +883,10 @@ impl Scheduler {
             }
         }
 
-        self.build_result(execution_id, start_time, all_results, errors)
+        self.build_result(execution_id, start_time, all_results, errors).await
     }
 
-    fn build_result(
+    async fn build_result(
         &self,
         execution_id: String,
         start_time: DateTime<Utc>,
@@ -926,6 +933,8 @@ impl Scheduler {
             checkpoint: self.config.checkpoint.clone(),
         };
 
+        let outputs = self.resolve_workflow_outputs().await;
+
         Ok(WorkflowResult {
             status,
             workflow: WorkflowInfo {
@@ -935,10 +944,30 @@ impl Scheduler {
             },
             execution: execution_info,
             steps: results,
-            outputs: None,
+            outputs,
             metrics,
             errors,
         })
+    }
+
+    async fn resolve_workflow_outputs(&self) -> Option<HashMap<String, serde_json::Value>> {
+        let output_templates = self.workflow_outputs.read().await.clone()?;
+        if output_templates.is_empty() {
+            return None;
+        }
+        let ctx = self.context.read().await;
+        let mut resolved = HashMap::new();
+        for (key, template) in &output_templates {
+            match ctx.evaluate(template) {
+                Ok(value) => {
+                    resolved.insert(key.clone(), value);
+                }
+                Err(_) => {
+                    resolved.insert(key.clone(), serde_json::Value::String(template.clone()));
+                }
+            }
+        }
+        Some(resolved)
     }
 }
 
@@ -963,11 +992,16 @@ impl WorkflowRunner for Scheduler {
             self.checkpoint_manager.clone(),
         );
 
-        // 设置子工作流的上下文
-        let mut ctx = self.context.write().await;
-        ctx.inputs = inputs;
+        let sub_context = ExecutionContext::new(&workflow_def, inputs);
+        sub_scheduler.set_context(sub_context).await;
+        if let Some(outputs) = &workflow_def.outputs {
+            let outputs_map: HashMap<String, String> = outputs
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            sub_scheduler.set_outputs(outputs_map).await;
+        }
 
-        // 运行子工作流
         sub_scheduler.run().await
     }
 }

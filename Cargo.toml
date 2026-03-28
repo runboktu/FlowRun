@@ -90,3 +90,11 @@ path = "examples/code/07_full_execution.rs"
 [[example]]
 name = "08_condition_branch"
 path = "examples/code/08_condition_branch.rs"
+
+[[example]]
+name = "09_subworkflow"
+path = "examples/code/09_subworkflow.rs"
+
+[[example]]
+name = "11_comprehensive_cicd"
+path = "examples/code/11_comprehensive_cicd.rs"
