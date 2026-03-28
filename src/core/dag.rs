@@ -510,6 +510,13 @@ impl Scheduler {
         let mut results = Vec::new();
         for sub_step in steps {
             let result = Self::execute_step(sub_step, context, workflow_executor.clone(), approve_executor.clone()).await?;
+
+            // 将子步骤结果存储到上下文中，便于后续模板引用
+            {
+                let mut ctx = context.write().await;
+                ctx.step_outputs.insert(sub_step.id.clone(), result.clone());
+            }
+
             results.push(result);
         }
 

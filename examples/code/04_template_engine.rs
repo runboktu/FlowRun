@@ -1,108 +1,142 @@
-//! 中级示例 - 模板引擎
+//! 中级示例 - 并行执行
 //!
 //! 这个示例展示如何：
-//! - 使用模板表达式求值
-//! - 应用过滤器链
-//! - 处理条件表达式
+//! - 加载并行执行工作流
+//! - 使用 Scheduler 执行多个并行 API 调用
+//! - 观察并行执行结果
 
-use flow_run::core::template::TemplateEngine;
-use serde_json::json;
+use flow_run::core::context::ExecutionContext;
+use flow_run::core::dag::{DagScheduler, Scheduler};
+use flow_run::core::parser::WorkflowParser;
+use flow_run::utils::checkpoint::CheckpointManager;
 use std::collections::HashMap;
+use std::path::Path;
+use tempfile::tempdir;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter("info")
+        .with_env_filter("flow_run=info")
         .init();
 
     println!("==========================================");
-    println!("  flow-run - 中级示例：模板引擎");
+    println!("  flow-run - 中级示例：并行执行");
     println!("==========================================\n");
 
-    // 创建模板引擎
-    let engine = TemplateEngine::new();
+    // 1. 从文件加载工作流
+    let workflow_path = Path::new("examples/04_intermediate_parallel.yaml");
+    println!("[1] 从文件加载工作流: {:?}", workflow_path);
+    let workflow = WorkflowParser::from_file(workflow_path)?;
+    println!("    ✅ 加载成功!\n");
 
-    // 创建测试上下文
-    let mut context = HashMap::new();
-    context.insert("inputs".to_string(), json!({
-        "app_name": "myapp",
-        "environment": "staging",
-        "version": "v1.2.3"
-    }));
-    context.insert("steps".to_string(), json!({
-        "deploy": {
-            "response": {
-                "body": {
-                    "url": "https://myapp.example.com",
-                    "id": "deploy_123"
+    // 2. 显示工作流信息
+    println!("[2] 工作流信息:");
+    println!("    名称: {}", workflow.name);
+    println!("    描述: {}", workflow.description.as_deref().unwrap_or("无"));
+    println!("    步骤数: {}\n", workflow.steps.len());
+
+    // 3. 创建 DAG 调度器并分析依赖
+    println!("[3] DAG 分析:");
+    let dag = DagScheduler::new(workflow.steps.clone())?;
+
+    // 检查循环依赖
+    match dag.has_cycle() {
+        Ok(false) => println!("    ✅ 无循环依赖"),
+        Ok(true) => {
+            println!("    ❌ 检测到循环依赖!");
+            return Err(anyhow::anyhow!("工作流包含循环依赖"));
+        }
+        Err(e) => {
+            println!("    ❌ 检查失败: {}", e);
+            return Err(e.into());
+        }
+    }
+
+    // 显示依赖关系
+    println!("\n    步骤依赖关系:");
+    for step in &workflow.steps {
+        let deps = step.depends_on.as_ref()
+            .map(|d| d.join(", "))
+            .unwrap_or_else(|| "无".to_string());
+        println!("      {} -> [{}]", step.id, deps);
+    }
+
+    // 执行拓扑排序
+    let batches = dag.topological_sort()?;
+    println!("\n    执行批次:");
+    for (i, batch) in batches.iter().enumerate() {
+        println!("      批次 {}: {:?}", i + 1, batch);
+    }
+    println!();
+
+    // 4. 创建输入参数
+    let api_endpoints = "https://jsonplaceholder.typicode.com";
+    println!("[4] 输入参数:");
+    println!("    api_endpoints: {}\n", api_endpoints);
+
+    let mut inputs = HashMap::new();
+    inputs.insert("api_endpoints".to_string(), serde_json::json!(api_endpoints));
+
+    // 5. 创建执行上下文
+    println!("[5] 创建执行上下文");
+    let context = ExecutionContext::new(&workflow, inputs);
+    println!("    执行 ID: {}\n", context.execution_id);
+
+    // 6. 创建 Scheduler 并设置上下文
+    println!("[6] 创建 Scheduler");
+    let temp_dir = tempdir()?;
+    let checkpoint_manager = CheckpointManager::new(temp_dir.path().to_path_buf())?;
+    let config = workflow.config.clone().unwrap_or_default();
+    let scheduler = Scheduler::new(dag, config, checkpoint_manager);
+    scheduler.set_context(context).await;
+    println!("    ✅ Scheduler 创建成功\n");
+
+    // 7. 使用 Scheduler 执行工作流
+    println!("[7] 执行工作流...");
+    println!("    批次 1: parallel_api_calls (3 个并行 API 调用)");
+    println!("    批次 2: aggregate (聚合结果)\n");
+    let result = scheduler.run().await?;
+
+    // 8. 显示执行结果
+    println!("[8] 执行结果:");
+    println!("    状态: {:?}", result.status);
+    println!("    步骤结果:");
+    for step in &result.steps {
+        println!("      - {}: {:?}", step.step_id, step.status);
+        if let Some(output) = &step.output {
+            if let Some(stdout) = output.get("stdout").and_then(|v| v.as_str()) {
+                if !stdout.is_empty() {
+                    let display = if stdout.len() > 80 {
+                        format!("{}...", &stdout[..80])
+                    } else {
+                        stdout.to_string()
+                    };
+                    println!("        stdout: {}", display.replace('\n', " "));
+                }
+            }
+            if let Some(body) = output.get("response").and_then(|r| r.get("body")) {
+                if let Some(title) = body.get("title").and_then(|t| t.as_str()) {
+                    println!("        title: {}", title);
                 }
             }
         }
-    }));
-    context.insert("variables".to_string(), json!({
-        "items": ["apple", "banana", "cherry"],
-        "users": [
-            {"name": "Alice", "status": "active"},
-            {"name": "Bob", "status": "inactive"}
-        ]
-    }));
-
-    // 基本路径访问
-    println!("[1] 基本路径访问:");
-    let paths = vec![
-        "inputs.app_name",
-        "inputs.environment",
-        "steps.deploy.response.body.url",
-        "variables.items[0]",
-        "variables.users[1].name",
-    ];
-    for path in paths {
-        let result = engine.evaluate(path, &context)?;
-        println!("    {} -> {}", path, result);
     }
     println!();
 
-    // 过滤器链
-    println!("[2] 过滤器链:");
-    let filters = vec![
-        ("inputs.app_name | uppercase", "大写转换"),
-        ("inputs.app_name | lowercase", "小写转换"),
-        ("inputs.app_name | truncate(3)", "截断字符串"),
-        ("variables.items | length", "数组长度"),
-        ("variables.items | join(', ')", "数组拼接"),
-        ("variables.items | slice(0, 2)", "数组切片"),
-        ("variables.items | first", "首元素"),
-    ];
-    for (expr, desc) in filters {
-        let result = engine.evaluate(expr, &context)?;
-        println!("    {} ({}): {}", expr, desc, result);
-    }
-    println!();
+    // 9. 显示执行指标
+    println!("[9] 执行指标:");
+    println!("    总步骤: {}", result.metrics.total_steps);
+    println!("    成功: {}", result.metrics.success_steps);
+    println!("    失败: {}", result.metrics.failed_steps);
+    println!("    耗时: {}ms\n", result.metrics.total_duration_ms);
 
-    // 条件表达式
-    println!("[3] 条件表达式:");
-    let conditions = vec![
-        "inputs.environment == 'staging'",
-        "inputs.environment == 'production'",
-        "inputs.missing || 'default_value'",
-    ];
-    for expr in conditions {
-        let result = engine.evaluate(expr, &context)?;
-        println!("    {} -> {}", expr, result);
-    }
-    println!();
-
-    // 完整模板解析
-    println!("[4] 完整模板解析:");
-    let templates = vec![
-        "Deploying ${{inputs.app_name}} version ${{inputs.version}}",
-        "URL: ${{steps.deploy.response.body.url}}",
-        "Items: ${{variables.items | join(', ')}}",
-    ];
-    for template in templates {
-        let result = engine.resolve_template(template, &context)?;
-        println!("    模板: {}", template);
-        println!("    结果: {}\n", result);
+    // 10. 显示输出
+    if let Some(outputs) = &result.outputs {
+        println!("[10] 工作流输出:");
+        for (key, value) in outputs {
+            println!("    {}: {}", key, value);
+        }
+        println!();
     }
 
     println!("==========================================");
