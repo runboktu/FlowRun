@@ -30,10 +30,10 @@ steps:
   - id: display_user
     name: "显示用户信息"
     type: shell
-    run: "echo '用户名: ${{ steps.fetch_user.response.body.name }}, 邮箱: ${{ steps.fetch_user.response.body.email }}'"
+    run: "echo '用户名: ${{ steps.fetch_user.response.body.username }}, 邮箱: ${{ steps.fetch_user.response.body.email }}'"
     depends_on:
       - fetch_user
 
 outputs:
-  user_name: "${{ steps.fetch_user.response.body.name }}"
+  user_name: "${{ steps.fetch_user.response.body.username }}"
   user_email: "${{ steps.fetch_user.response.body.email }}"

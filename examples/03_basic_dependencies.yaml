@@ -39,7 +39,8 @@ steps:
     type: shell
     run: |
       echo '处理数据...'
-      echo '数据大小: $(echo '${{ steps.fetch_data.response.body }}' | wc -c) 字节'
+      echo '数据ID: ${{ steps.fetch_data.response.body.id }}'
+      echo '数据标题: ${{ steps.fetch_data.response.body.title }}'
     depends_on:
       - fetch_data
 

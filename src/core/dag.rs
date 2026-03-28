@@ -167,6 +167,12 @@ impl Scheduler {
         }
     }
 
+    /// 设置执行上下文
+    pub async fn set_context(&self, context: ExecutionContext) {
+        let mut ctx = self.context.write().await;
+        *ctx = context;
+    }
+
     pub fn with_workflow_executor(
         dag: DagScheduler,
         config: WorkflowConfig,
@@ -344,12 +350,34 @@ impl Scheduler {
 
     async fn execute_http_step(
         step_def: &StepDefinition,
-        _context: &Arc<RwLock<ExecutionContext>>,
+        context: &Arc<RwLock<ExecutionContext>>,
     ) -> Result<StepResult, WorkflowError> {
-        let url = step_def.api.as_ref().ok_or_else(|| {
+        let url_template = step_def.api.as_ref().ok_or_else(|| {
             WorkflowError::Other(format!("步骤 {} 缺少 API 地址", step_def.id))
         })?;
 
+        // 使用模板引擎解析 URL
+        let ctx = context.read().await;
+        let template_engine = crate::core::template::TemplateEngine::new();
+
+        // 构建完整的模板上下文（包含 inputs、variables、steps）
+        let mut template_ctx = ctx.variables.clone();
+        template_ctx.insert("inputs".to_string(), serde_json::to_value(&ctx.inputs).unwrap_or_default());
+
+        // 构建 steps 上下文：只包含 output 字段，便于模板直接访问
+        let mut steps_ctx = serde_json::Map::new();
+        for (step_id, result) in &ctx.step_outputs {
+            if let Some(output) = &result.output {
+                steps_ctx.insert(step_id.clone(), output.clone());
+            }
+        }
+        template_ctx.insert("steps".to_string(), serde_json::Value::Object(steps_ctx));
+
+        let url = template_engine.resolve_template(url_template, &template_ctx)
+            .map_err(|e| WorkflowError::Other(format!("模板解析失败: {}", e)))?;
+        drop(ctx);
+
+        tracing::info!("HTTP 请求: {} {}", step_def.method.as_deref().unwrap_or("GET"), url);
         let method = step_def.method.as_deref().unwrap_or("GET");
 
         let client = reqwest::Client::new();
@@ -399,8 +427,16 @@ impl Scheduler {
             ));
         }
 
-        let output: serde_json::Value = serde_json::from_str(&body_text).unwrap_or_else(|_| {
+        let body: serde_json::Value = serde_json::from_str(&body_text).unwrap_or_else(|_| {
             serde_json::json!({ "text": body_text })
+        });
+
+        // 将输出包装为 response.body 结构，便于模板引用
+        let output = serde_json::json!({
+            "response": {
+                "status_code": status_code,
+                "body": body
+            }
         });
 
         Ok(StepResult::success(&step_def.id, output))
@@ -408,12 +444,34 @@ impl Scheduler {
 
     async fn execute_shell_step(
         step_def: &StepDefinition,
-        _context: &Arc<RwLock<ExecutionContext>>,
+        context: &Arc<RwLock<ExecutionContext>>,
     ) -> Result<StepResult, WorkflowError> {
-        let command = step_def.run.as_ref().ok_or_else(|| {
+        let command_template = step_def.run.as_ref().ok_or_else(|| {
             WorkflowError::Other(format!("步骤 {} 缺少 run 命令", step_def.id))
         })?;
 
+        // 使用模板引擎解析命令
+        let ctx = context.read().await;
+        let template_engine = crate::core::template::TemplateEngine::new();
+
+        // 构建完整的模板上下文（包含 inputs、variables、steps）
+        let mut template_ctx = ctx.variables.clone();
+        template_ctx.insert("inputs".to_string(), serde_json::to_value(&ctx.inputs).unwrap_or_default());
+
+        // 构建 steps 上下文：只包含 output 字段，便于模板直接访问
+        let mut steps_ctx = serde_json::Map::new();
+        for (step_id, result) in &ctx.step_outputs {
+            if let Some(output) = &result.output {
+                steps_ctx.insert(step_id.clone(), output.clone());
+            }
+        }
+        template_ctx.insert("steps".to_string(), serde_json::Value::Object(steps_ctx));
+
+        let command = template_engine.resolve_template(command_template, &template_ctx)
+            .map_err(|e| WorkflowError::Other(format!("模板解析失败: {}", e)))?;
+        drop(ctx);
+
+        tracing::info!("执行命令: {}", command);
         let output = tokio::process::Command::new("sh")
             .arg("-c")
             .arg(command)

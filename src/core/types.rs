@@ -53,6 +53,23 @@ pub struct WorkflowConfig {
     pub hooks: Option<HookGlobalConfig>,
 }
 
+impl Default for WorkflowConfig {
+    fn default() -> Self {
+        Self {
+            timeout: None,
+            retry: None,
+            on_failure: None,
+            checkpoint: None,
+            max_concurrent: None,
+            timeout_strategy: None,
+            resume: None,
+            history: None,
+            cleanup: None,
+            hooks: None,
+        }
+    }
+}
+
 /// 重试配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetryConfig {
