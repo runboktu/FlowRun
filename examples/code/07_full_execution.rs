@@ -1,17 +1,17 @@
-//! 综合示例 - 完整工作流执行
+//! 高级示例 - 循环执行
 //!
 //! 这个示例展示如何：
-//! - 加载 YAML 工作流
-//! - 创建执行上下文
-//! - 使用 DAG 调度器执行工作流
-//! - 处理执行结果
+//! - 加载多步骤顺序执行工作流
+//! - 使用 Scheduler 执行工作流
+//! - 观察步骤依赖和执行顺序
 
 use flow_run::core::context::ExecutionContext;
-use flow_run::core::dag::DagScheduler;
+use flow_run::core::dag::{DagScheduler, Scheduler};
 use flow_run::core::parser::WorkflowParser;
-use flow_run::core::types::{WorkflowConfig, WorkflowResult, WorkflowStatus};
+use flow_run::utils::checkpoint::CheckpointManager;
 use std::collections::HashMap;
 use std::path::Path;
+use tempfile::tempdir;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -20,140 +20,114 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     println!("==========================================");
-    println!("  flow-run - 综合示例：完整工作流执行");
+    println!("  flow-run - 高级示例：循环执行");
     println!("==========================================\n");
 
-    // 1. 加载工作流定义
-    println!("[1] 加载工作流定义");
-    let workflow_path = Path::new("examples/02_basic_shell.yaml");
+    // 1. 从文件加载工作流
+    let workflow_path = Path::new("examples/07_advanced_loop.yaml");
+    println!("[1] 从文件加载工作流: {:?}", workflow_path);
     let workflow = WorkflowParser::from_file(workflow_path)?;
-    println!("    工作流: {}", workflow.name);
+    println!("    ✅ 加载成功!\n");
+
+    // 2. 显示工作流信息
+    println!("[2] 工作流信息:");
+    println!("    名称: {}", workflow.name);
+    println!("    描述: {}", workflow.description.as_deref().unwrap_or("无"));
     println!("    步骤数: {}\n", workflow.steps.len());
 
-    // 2. 创建输入参数
-    println!("[2] 创建输入参数");
-    let mut inputs = HashMap::new();
-    inputs.insert("project_name".to_string(), serde_json::json!("demo-project"));
-    inputs.insert("environment".to_string(), serde_json::json!("development"));
-    for (key, value) in &inputs {
-        println!("    {}: {}", key, value);
-    }
-    println!();
-
-    // 3. 创建执行上下文
-    println!("[3] 创建执行上下文");
-    let context = ExecutionContext::new(&workflow, inputs);
-    println!("    执行 ID: {}", context.execution_id);
-    println!("    工作流: {}", context.workflow_name);
-    println!("    开始时间: {}\n", context.started_at);
-
-    // 4. 创建 DAG 调度器
-    println!("[4] 创建 DAG 调度器");
+    // 3. 创建 DAG 调度器并分析依赖
+    println!("[3] DAG 分析:");
     let dag = DagScheduler::new(workflow.steps.clone())?;
 
     // 检查循环依赖
-    if dag.has_cycle()? {
-        eprintln!("    ❌ 检测到循环依赖!");
-        return Err(anyhow::anyhow!("工作流包含循环依赖"));
+    match dag.has_cycle() {
+        Ok(false) => println!("    ✅ 无循环依赖"),
+        Ok(true) => {
+            println!("    ❌ 检测到循环依赖!");
+            return Err(anyhow::anyhow!("工作流包含循环依赖"));
+        }
+        Err(e) => {
+            println!("    ❌ 检查失败: {}", e);
+            return Err(e.into());
+        }
     }
-    println!("    ✅ 无循环依赖\n");
 
-    // 显示执行批次
+    // 显示依赖关系
+    println!("\n    步骤依赖关系:");
+    for step in &workflow.steps {
+        let deps = step.depends_on.as_ref()
+            .map(|d| d.join(", "))
+            .unwrap_or_else(|| "无".to_string());
+        println!("      {} -> [{}]", step.id, deps);
+    }
+
+    // 执行拓扑排序
     let batches = dag.topological_sort()?;
-    println!("[5] 执行计划 ({} 个批次):", batches.len());
+    println!("\n    执行批次:");
     for (i, batch) in batches.iter().enumerate() {
-        println!("    批次 {}: {:?}", i + 1, batch);
+        println!("      批次 {}: {:?}", i + 1, batch);
     }
     println!();
 
-    // 5. 显示工作流配置
-    println!("[6] 工作流配置:");
-    if let Some(config) = &workflow.config {
-        if let Some(timeout) = &config.timeout {
-            println!("    超时: {}", timeout);
-        }
-        if let Some(max_concurrent) = config.max_concurrent {
-            println!("    最大并发: {}", max_concurrent);
-        }
-        if let Some(on_failure) = &config.on_failure {
-            println!("    失败策略: {:?}", on_failure);
-        }
-    } else {
-        println!("    使用默认配置");
-    }
-    println!();
+    // 4. 创建输入参数
+    println!("[4] 输入参数:");
+    let mut inputs = HashMap::new();
+    inputs.insert("count".to_string(), serde_json::json!("3"));
+    println!("    count: 3\n");
 
-    // 6. 模拟执行结果
-    println!("[7] 模拟执行结果:");
-    let mock_result = create_mock_result(&workflow.name, &workflow.steps);
-    println!("    状态: {:?}", mock_result.status);
+    // 5. 创建执行上下文
+    println!("[5] 创建执行上下文");
+    let context = ExecutionContext::new(&workflow, inputs);
+    println!("    执行 ID: {}\n", context.execution_id);
+
+    // 6. 创建 Scheduler 并设置上下文
+    println!("[6] 创建 Scheduler");
+    let temp_dir = tempdir()?;
+    let checkpoint_manager = CheckpointManager::new(temp_dir.path().to_path_buf())?;
+    let config = workflow.config.clone().unwrap_or_default();
+    let scheduler = Scheduler::new(dag, config, checkpoint_manager);
+    scheduler.set_context(context).await;
+    println!("    ✅ Scheduler 创建成功\n");
+
+    // 7. 使用 Scheduler 执行工作流
+    println!("[7] 执行工作流...");
+    let result = scheduler.run().await?;
+
+    // 8. 显示执行结果
+    println!("[8] 执行结果:");
+    println!("    状态: {:?}", result.status);
     println!("    步骤结果:");
-    for step in &mock_result.steps {
+    for step in &result.steps {
         println!("      - {}: {:?}", step.step_id, step.status);
+        if let Some(output) = &step.output {
+            if let Some(stdout) = output.get("stdout").and_then(|v| v.as_str()) {
+                if !stdout.is_empty() {
+                    println!("        stdout: {}", stdout.replace('\n', " "));
+                }
+            }
+        }
     }
     println!();
 
-    // 7. 显示执行指标
-    println!("[8] 执行指标:");
-    println!("    总步骤: {}", mock_result.metrics.total_steps);
-    println!("    成功: {}", mock_result.metrics.success_steps);
-    println!("    失败: {}", mock_result.metrics.failed_steps);
-    println!("    跳过: {}", mock_result.metrics.skipped_steps);
-    println!("    耗时: {}ms\n", mock_result.metrics.total_duration_ms);
+    // 9. 显示执行指标
+    println!("[9] 执行指标:");
+    println!("    总步骤: {}", result.metrics.total_steps);
+    println!("    成功: {}", result.metrics.success_steps);
+    println!("    失败: {}", result.metrics.failed_steps);
+    println!("    耗时: {}ms\n", result.metrics.total_duration_ms);
+
+    // 10. 显示输出
+    if let Some(outputs) = &result.outputs {
+        println!("[10] 工作流输出:");
+        for (key, value) in outputs {
+            println!("    {}: {}", key, value);
+        }
+        println!();
+    }
 
     println!("==========================================");
     println!("  示例完成!");
     println!("==========================================");
 
     Ok(())
-}
-
-fn create_mock_result(
-    workflow_name: &str,
-    steps: &[flow_run::core::types::StepDefinition],
-) -> WorkflowResult {
-    use flow_run::core::types::*;
-    use chrono::Utc;
-
-    let now = Utc::now();
-    let step_results: Vec<StepResult> = steps
-        .iter()
-        .map(|step| StepResult {
-            step_id: step.id.clone(),
-            status: StepStatus::Success,
-            started_at: now,
-            completed_at: Some(now),
-            duration_ms: Some(100),
-            output: Some(serde_json::json!({"mock": true})),
-            error: None,
-        })
-        .collect();
-
-    WorkflowResult {
-        status: WorkflowStatus::Success,
-        workflow: WorkflowInfo {
-            name: workflow_name.to_string(),
-            version: Some("1.0.0".to_string()),
-            file: "mock.yaml".to_string(),
-        },
-        execution: ExecutionInfo {
-            id: "mock-execution".to_string(),
-            started_at: now,
-            completed_at: Some(now),
-            duration_ms: Some(steps.len() as u64 * 100),
-            checkpoint: None,
-        },
-        steps: step_results,
-        outputs: Some(HashMap::from([
-            ("status".to_string(), serde_json::json!("success")),
-        ])),
-        metrics: ExecutionMetrics {
-            total_steps: steps.len(),
-            success_steps: steps.len(),
-            failed_steps: 0,
-            skipped_steps: 0,
-            total_duration_ms: steps.len() as u64 * 100,
-        },
-        errors: vec![],
-    }
 }

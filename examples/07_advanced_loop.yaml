@@ -19,6 +19,12 @@ inputs:
     description: "逗号分隔的项目列表"
 
 steps:
+  # 初始化项目列表
+  - id: init_items
+    name: "初始化项目列表"
+    type: shell
+    run: "echo '项目列表已准备'"
+
   # ForEach 循环：遍历数组
   - id: process_items
     name: "处理每个项目"
@@ -37,17 +43,11 @@ steps:
     depends_on:
       - init_items
 
-  # 初始化项目列表
-  - id: init_items
-    name: "初始化项目列表"
-    type: shell
-    run: "echo '项目列表已准备'"
-
   # Range 循环：数字范围
   - id: range_loop
     name: "范围循环"
     type: loop
-    range:
+    loop:
       start: 1
       end: 5
     do_steps:
@@ -55,29 +55,6 @@ steps:
         name: "范围步骤"
         type: shell
         run: "echo '迭代次数: ${{ loop.current }}'"
-
-  # While 循环：条件循环
-  - id: retry_until_success
-    name: "重试直到成功"
-    type: loop
-    while:
-      condition: "variables.retry_count < 3"
-      max_iterations: 5
-    do_steps:
-      - id: attempt_task
-        name: "尝试任务"
-        type: shell
-        run: |
-          COUNT=$((RANDOM % 3))
-          if [ $COUNT -eq 0 ]; then
-            echo "成功!"
-            exit 0
-          else
-            echo "失败，重试中..."
-            exit 1
-          fi
-    depends_on:
-      - range_loop
 
 variables:
   item_list:

@@ -360,12 +360,17 @@ impl Scheduler {
         let ctx = context.read().await;
         let template_engine = crate::core::template::TemplateEngine::new();
 
-        // 构建完整的模板上下文（包含 inputs、variables、steps）
+        // 构建完整的模板上下文（包含 inputs、variables、steps、loop）
         let mut template_ctx = HashMap::new();
 
-        // 添加 variables（包含工作流定义的变量）
+        // 添加 variables（包含工作流定义的变量和循环变量）
         let variables_value = serde_json::to_value(&ctx.variables).unwrap_or_default();
-        template_ctx.insert("variables".to_string(), variables_value);
+        template_ctx.insert("variables".to_string(), variables_value.clone());
+
+        // 如果有 loop 变量，将其添加到顶层（支持 ${{ loop.current }} 语法）
+        if let Some(loop_vars) = ctx.variables.get("loop") {
+            template_ctx.insert("loop".to_string(), loop_vars.clone());
+        }
 
         // 添加 inputs
         let inputs_value = serde_json::to_value(&ctx.inputs).unwrap_or_default();
@@ -461,12 +466,17 @@ impl Scheduler {
         let ctx = context.read().await;
         let template_engine = crate::core::template::TemplateEngine::new();
 
-        // 构建完整的模板上下文（包含 inputs、variables、steps）
+        // 构建完整的模板上下文（包含 inputs、variables、steps、loop）
         let mut template_ctx = HashMap::new();
 
-        // 添加 variables（包含工作流定义的变量）
+        // 添加 variables（包含工作流定义的变量和循环变量）
         let variables_value = serde_json::to_value(&ctx.variables).unwrap_or_default();
-        template_ctx.insert("variables".to_string(), variables_value);
+        template_ctx.insert("variables".to_string(), variables_value.clone());
+
+        // 如果有 loop 变量，将其添加到顶层（支持 ${{ loop.current }} 语法）
+        if let Some(loop_vars) = ctx.variables.get("loop") {
+            template_ctx.insert("loop".to_string(), loop_vars.clone());
+        }
 
         // 添加 inputs
         let inputs_value = serde_json::to_value(&ctx.inputs).unwrap_or_default();
@@ -547,7 +557,7 @@ impl Scheduler {
         workflow_executor: Arc<WorkflowExecutor>,
         approve_executor: Arc<ApproveExecutor>,
     ) -> Result<StepResult, WorkflowError> {
-        let _loop_config = step_def.r#loop.as_ref().ok_or_else(|| {
+        let loop_config = step_def.r#loop.as_ref().ok_or_else(|| {
             WorkflowError::Other(format!("步骤 {} 缺少循环配置", step_def.id))
         })?;
 
@@ -555,18 +565,171 @@ impl Scheduler {
             WorkflowError::Other(format!("步骤 {} 缺少循环体步骤", step_def.id))
         })?;
 
-        let mut results = Vec::new();
-        for sub_step in do_steps {
-            let result = Self::execute_step(sub_step, context, workflow_executor.clone(), approve_executor.clone()).await?;
-            results.push(result);
+        let mut all_results = Vec::new();
+        let mut iteration = 0;
+
+        // 根据循环类型执行
+        match loop_config {
+            LoopConfig::ForEach { over, r#as } => {
+                // 获取要遍历的数组
+                let ctx = context.read().await;
+                let items = Self::resolve_array(over, &ctx)?;
+                drop(ctx);
+
+                for (index, item) in items.iter().enumerate() {
+                    iteration += 1;
+
+                    // 创建循环上下文变量
+                    {
+                        let mut ctx = context.write().await;
+                        ctx.variables.insert(
+                            "loop".to_string(),
+                            serde_json::json!({
+                                "index": index,
+                                "item": item,
+                                "first": index == 0,
+                                "last": index == items.len() - 1
+                            }),
+                        );
+                        ctx.variables.insert(r#as.clone(), item.clone());
+                    }
+
+                    // 执行循环体
+                    for sub_step in do_steps {
+                        let result = Self::execute_step(
+                            sub_step,
+                            context,
+                            workflow_executor.clone(),
+                            approve_executor.clone(),
+                        ).await?;
+                        all_results.push(result);
+                    }
+                }
+            }
+
+            LoopConfig::Range { start, end } => {
+                for i in *start..=*end {
+                    iteration += 1;
+
+                    // 创建循环上下文变量
+                    {
+                        let mut ctx = context.write().await;
+                        ctx.variables.insert(
+                            "loop".to_string(),
+                            serde_json::json!({
+                                "current": i,
+                                "index": (i - start) as usize,
+                                "first": i == *start,
+                                "last": i == *end
+                            }),
+                        );
+                    }
+
+                    // 执行循环体
+                    for sub_step in do_steps {
+                        let result = Self::execute_step(
+                            sub_step,
+                            context,
+                            workflow_executor.clone(),
+                            approve_executor.clone(),
+                        ).await?;
+                        all_results.push(result);
+                    }
+                }
+            }
+
+            LoopConfig::While {
+                condition,
+                max_iterations,
+            } => {
+                let max_iter = max_iterations.unwrap_or(100);
+
+                while iteration < max_iter {
+                    // 检查条件
+                    let ctx = context.read().await;
+                    let template_engine = crate::core::template::TemplateEngine::new();
+                    let mut template_ctx = HashMap::new();
+                    template_ctx.insert(
+                        "variables".to_string(),
+                        serde_json::to_value(&ctx.variables).unwrap_or_default(),
+                    );
+                    let condition_result = template_engine.evaluate(condition, &template_ctx)
+                        .unwrap_or(serde_json::Value::Bool(false));
+                    drop(ctx);
+
+                    // 检查条件是否为真
+                    let should_continue = condition_result.as_bool().unwrap_or(false)
+                        || condition_result.as_i64().unwrap_or(0) > 0
+                        || condition_result.as_str().map(|s| s != "false" && s != "0").unwrap_or(false);
+
+                    if !should_continue {
+                        break;
+                    }
+
+                    iteration += 1;
+
+                    // 创建循环上下文变量
+                    {
+                        let mut ctx = context.write().await;
+                        ctx.variables.insert(
+                            "loop".to_string(),
+                            serde_json::json!({
+                                "iteration": iteration,
+                                "index": iteration - 1
+                            }),
+                        );
+                    }
+
+                    // 执行循环体
+                    for sub_step in do_steps {
+                        let result = Self::execute_step(
+                            sub_step,
+                            context,
+                            workflow_executor.clone(),
+                            approve_executor.clone(),
+                        ).await?;
+                        all_results.push(result);
+                    }
+                }
+            }
         }
 
         let output = serde_json::json!({
-            "iterations": results.len(),
-            "results": results.iter().map(|r| &r.output).collect::<Vec<_>>()
+            "iterations": iteration,
+            "results": all_results.iter().map(|r| &r.output).collect::<Vec<_>>()
         });
 
         Ok(StepResult::success(&step_def.id, output))
+    }
+
+    /// 解析数组表达式
+    fn resolve_array(
+        expr: &str,
+        context: &ExecutionContext,
+    ) -> Result<Vec<serde_json::Value>, WorkflowError> {
+        // 处理 variables.xxx 格式
+        if let Some(var_name) = expr.strip_prefix("variables.") {
+            if let Some(value) = context.variables.get(var_name) {
+                if let Some(arr) = value.as_array() {
+                    return Ok(arr.clone());
+                }
+            }
+        }
+
+        // 处理 inputs.xxx 格式
+        if let Some(input_name) = expr.strip_prefix("inputs.") {
+            if let Some(value) = context.inputs.get(input_name) {
+                if let Some(arr) = value.as_array() {
+                    return Ok(arr.clone());
+                }
+                // 如果是字符串，尝试分割
+                if let Some(s) = value.as_str() {
+                    return Ok(s.split(',').map(|v| serde_json::json!(v.trim())).collect());
+                }
+            }
+        }
+
+        Err(WorkflowError::Other(format!("无法解析数组表达式: {}", expr)))
     }
 
     async fn execute_condition_step(
