@@ -726,3 +726,191 @@ step1 → step2 → step4
 1. **分批执行**：需要支持并行执行同一层级的步骤
 2. **循环检测**：在排序前先检测循环依赖
 3. **与工作流引擎集成**：返回结果直接用于 `Scheduler::run()` 的批次执行
+
+---
+
+## 10. 步骤间结果传递机制详解
+
+这是 flow-run 最核心的运行时机制——前一个步骤的执行结果如何被后一个步骤引用。
+
+### 10.1 整体数据流
+
+```
+步骤 A 执行完毕
+       │
+       ▼
+StepResult { step_id: "A", output: Some({...}), status, ... }
+       │
+       ▼  Scheduler.run() 中，每个批次执行后写入
+       │
+ExecutionContext.step_outputs["A"] = StepResult(...)
+       │
+       ▼  步骤 B 执行前，构建模板上下文
+       │
+template_ctx = {
+    "inputs":   { "api_url": "https://..." },
+    "steps":    { "A": <StepResult.output 的值> },  ← 关键：只取 output 字段
+    "variables": { ... }
+}
+       │
+       ▼  TemplateEngine 解析 B 的 run/api 字段中的 ${{ steps.A.xxx }}
+       │
+${{ steps.A.response.body.title }}  →  沿 JSON 路径逐层取值
+       │
+步骤 B 拿到步骤 A 的输出数据
+```
+
+### 10.2 StepResult.output 的 JSON 结构
+
+不同步骤类型的 `output` 字段有不同结构：
+
+**Shell 步骤** — stdout 原始输出：
+```json
+{ "stdout": "目录已创建\n配置文件已写入\n" }
+```
+
+**HTTP 步骤** — 包装为 response 结构：
+```json
+{
+  "response": {
+    "status_code": 200,
+    "body": { "id": 1, "title": "...", "userId": 1 }
+  }
+}
+```
+
+**Parallel 步骤** — 子步骤 output 的数组：
+```json
+{
+  "results": [
+    { "response": { "status_code": 200, "body": {...} } },
+    { "response": { "status_code": 200, "body": {...} } },
+    { "response": { "status_code": 200, "body": {...} } }
+  ]
+}
+```
+
+**Workflow（子工作流）步骤** — 包含状态和输出：
+```json
+{
+  "workflow": "examples/sub.yaml",
+  "status": "Success",
+  "outputs": { "artifact_path": "/tmp/build/app.tar.gz" },
+  "metrics": { "total_steps": 3, "success_steps": 3, ... }
+}
+```
+
+### 10.3 写入：结果何时存入上下文
+
+在 `Scheduler::run()` 中（`src/core/dag.rs:215-218`），每个批次的所有步骤执行完毕后，立即写入共享上下文：
+
+```rust
+for result in &batch_results {
+    let mut ctx = self.context.write().await;
+    ctx.step_outputs.insert(result.step_id.clone(), result.clone());
+}
+```
+
+`step_outputs` 是 `HashMap<StepId, StepResult>`，key 是步骤 ID，value 是完整的 `StepResult`（包含 status、output、error、duration_ms 等）。
+
+**写入时机很重要**：同一批次内的并行步骤，后完成的会覆盖先完成的（通常不会冲突因为 ID 不同）。但不同批次之间是严格有序的——批次 N 的结果在批次 N+1 执行前已全部写入。
+
+### 10.4 读取：模板上下文如何构建
+
+当步骤 B 准备执行时（`execute_shell_step` 或 `execute_http_step`），会从 `ExecutionContext` 构建模板上下文（`src/core/dag.rs:490-503`）：
+
+```rust
+// 构建 steps 上下文：只包含 output 字段，便于模板直接访问
+let mut steps_ctx = serde_json::Map::new();
+for (step_id, result) in &ctx.step_outputs {
+    if let Some(output) = &result.output {
+        steps_ctx.insert(step_id.clone(), output.clone());
+    }
+}
+template_ctx.insert("steps".to_string(), serde_json::Value::Object(steps_ctx));
+```
+
+关键设计：
+- 只取 `result.output`，不包含 `status`、`error`、`duration_ms` 等元数据
+- 如果步骤失败且 `output` 为 `None`，该步骤 ID 不会出现在模板上下文中
+- 模板上下文还包含 `inputs`（输入参数）和 `variables`（工作流变量 + 循环变量）
+
+### 10.5 解析：`${{ steps.A.x.y }}` 如何解析
+
+当步骤 B 的 `run` 字段包含 `${{ steps.fetch_data.response.body.title }}` 时：
+
+1. **正则提取**：`TemplateEngine` 用 `\$\{\{([^}]+)\}\}` 提取内部表达式 `steps.fetch_data.response.body.title`
+
+2. **操作符检测**（优先级从高到低）：
+   - `||` 默认值操作符：`inputs.env || "staging"` → 如果左侧为 Null/空串，返回右侧
+   - `==` 相等比较：`inputs.risk_level == 'high'` → 返回 `true`/`false`
+   - `|` 过滤器链：`value | uppercase | truncate(10)` → 依次应用过滤器
+
+3. **路径解析**：按 `.` 分割为 `["steps", "fetch_data", "response", "body", "title"]`
+   - `resolve_path()` 先从 context 取根键 `steps` → 得到 steps_ctx 对象
+   - `navigate_path()` 逐层导航：
+     - `steps_ctx["fetch_data"]` → HTTP 步骤的 output：`{"response": {"status_code": 200, "body": {...}}}`
+     - `["response"]` → `{"status_code": 200, "body": {...}}`
+     - `["body"]` → `{"id": 1, "title": "..."}`
+     - `["title"]` → `"..."`
+
+4. **数组索引**：`variables.items[0].name`
+   - `items[0]` 先按 `[` 分割，取字段 `items`（空串时直接取数组），再按数字索引取元素
+
+5. **缺失路径返回 Null**：路径不存在时返回 `Value::Null`，而非报错。这使得 `||` 和 `default()` 过滤器可以优雅处理缺失值。
+
+### 10.6 两套路径解析系统的差异
+
+| 特性 | `TemplateEngine.resolve_path()` | `ExecutionContext.resolve_path()` |
+|:---|:---|:---|
+| 所在文件 | `src/core/template.rs` | `src/core/context.rs` |
+| 路径不存在时 | 返回 `Value::Null`（友好） | 返回 `WorkflowError::PathNotFound`（报错） |
+| 使用场景 | 步骤执行器解析 `run`/`api` 模板 | `evaluate()` 方法、output 解析 |
+| 数组越界 | 返回 `Value::Null` | 返回 `PathNotFound` |
+| 支持过滤器 | 是 | 否 |
+
+### 10.7 特殊场景
+
+**Parallel 步骤的子步骤间传递**：在 `execute_parallel_step()` 中（`src/core/dag.rs:550-553`），每个子步骤执行后**立即**写入上下文：
+
+```rust
+{
+    let mut ctx = context.write().await;
+    ctx.step_outputs.insert(sub_step.id.clone(), result.clone());
+}
+```
+
+这意味着并行组内的后续子步骤可以引用同组内先完成的子步骤输出。
+
+**循环步骤的变量传递**：循环变量通过 `context.variables["loop"]` 传递，在构建模板上下文时会被提取到顶层：
+
+```rust
+if let Some(loop_vars) = ctx.variables.get("loop") {
+    template_ctx.insert("loop".to_string(), loop_vars.clone());
+}
+```
+
+所以循环体内可以用 `${{ variables.loop.current }}` 或 `${{ loop.current }}` 访问当前迭代变量。
+
+**子工作流的上下文隔离**：子工作流创建独立的 `ExecutionContext`，默认透传父工作流的 inputs（可通过 `passthrough_vars` 指定变量、`isolation: true` 完全隔离）。子工作流的输出以包装结构返回给父工作流。
+
+### 10.8 完整示例：HTTP → Shell 结果传递
+
+```yaml
+steps:
+  - id: fetch
+    type: http
+    api: https://api.example.com/users/1
+    method: GET
+    # output = {"response": {"status_code": 200, "body": {"name": "Alice", "email": "a@b.com"}}}
+
+  - id: display
+    type: shell
+    depends_on: [fetch]
+    # 模板解析链:
+    #   steps.fetch → 取 fetch 步骤的 output
+    #   .response → {"status_code": 200, "body": {...}}
+    #   .body → {"name": "Alice", "email": "a@b.com"}
+    #   .name → "Alice"
+    run: echo "用户名: ${{ steps.fetch.response.body.name }}"
+```
