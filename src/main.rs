@@ -230,28 +230,227 @@ fn dry_run_workflow(
 
     if json {
         let plan = serde_json::json!({
-            "name": workflow.name,
-            "steps": workflow.steps.len(),
-            "batches": batches,
-            "inputs": inputs.iter().map(|(k, v)| (k, v)).collect::<HashMap<_, _>>(),
+            "workflow": {
+                "name": workflow.name,
+                "description": workflow.description,
+                "version": workflow.version,
+            },
+            "inputs": workflow.inputs.as_ref().map(|i| i.iter().map(|inp| serde_json::json!({
+                "name": inp.name,
+                "type": inp.r#type,
+                "required": inp.required,
+            })).collect::<Vec<_>>()),
+            "provided_inputs": inputs.iter().map(|(k, v)| (k, v)).collect::<HashMap<_, _>>(),
+            "config": workflow.config.as_ref().map(|c| serde_json::json!({
+                "timeout": c.timeout,
+                "on_failure": c.on_failure.as_ref().map(|f| format!("{:?}", f)),
+                "checkpoint": c.checkpoint,
+                "max_concurrent": c.max_concurrent,
+            })),
+            "outputs": workflow.outputs,
+            "steps": workflow.steps.iter().map(|s| serde_json::json!({
+                "id": s.id,
+                "name": s.name,
+                "type": format!("{:?}", s.r#type),
+                "depends_on": s.depends_on,
+                "timeout": s.timeout,
+                "retry": s.retry.as_ref().map(|r| serde_json::json!({
+                    "max_attempts": r.max_attempts,
+                    "strategy": r.strategy.as_ref().map(|s| format!("{:?}", s)),
+                })),
+            })).collect::<Vec<_>>(),
+            "dag": {
+                "edges": workflow.steps.iter().filter_map(|s| {
+                    s.depends_on.as_ref().map(|deps| serde_json::json!({
+                        "step": s.id,
+                        "depends_on": deps,
+                    }))
+                }).collect::<Vec<_>>(),
+            },
+            "topological_sort": {
+                "total_batches": batches.len(),
+                "batches": batches.iter().enumerate().map(|(i, b)| serde_json::json!({
+                    "batch": i + 1,
+                    "parallel": b.len() > 1,
+                    "steps": b,
+                })).collect::<Vec<_>>(),
+            },
         });
         println!("{}", serde_json::to_string_pretty(&plan)?);
-    } else {
-        println!("工作流: {}", workflow.name);
-        println!("文件: {}", workflow_file.display());
-        println!("步骤数: {}", workflow.steps.len());
-        println!("输入参数: {:?}", inputs);
-        println!("\n执行计划:");
-        for (i, batch) in batches.iter().enumerate() {
-            println!("  批次 {}:", i + 1);
-            for step_id in batch {
-                let step = workflow.steps.iter().find(|s| &s.id == step_id);
-                if let Some(s) = step {
-                    println!("    - {} ({:?})", s.id, s.r#type);
+        return Ok(());
+    }
+
+    println!("══════════════════════════════════════════════");
+    println!("  Dry Run: {}", workflow.name);
+    println!("══════════════════════════════════════════════");
+
+    if let Some(desc) = &workflow.description {
+        println!("  描述: {}", desc);
+    }
+    if let Some(ver) = &workflow.version {
+        println!("  版本: {}", ver);
+    }
+    println!("  文件: {}", workflow_file.display());
+    println!("  步骤: {} 个", workflow.steps.len());
+    println!("  DAG 检查: 无循环依赖");
+
+    if let Some(config) = &workflow.config {
+        println!("\n── 全局配置 ──");
+        if let Some(timeout) = &config.timeout {
+            println!("  超时: {}", timeout);
+        }
+        if let Some(failure) = &config.on_failure {
+            println!("  失败策略: {:?}", failure);
+        }
+        if let Some(cp) = &config.checkpoint {
+            println!("  检查点: {}", cp);
+        }
+        if let Some(max) = config.max_concurrent {
+            println!("  最大并发: {}", max);
+        }
+        if let Some(retry) = &config.retry {
+            println!("  全局重试: max={}, strategy={:?}", retry.max_attempts, retry.strategy);
+        }
+    }
+
+    if let Some(input_defs) = &workflow.inputs {
+        println!("\n── 输入参数 ──");
+        for inp in input_defs {
+            let req = if inp.required == Some(true) { "必填" } else { "可选" };
+            println!("  {} [{}]: {}", inp.name, req, inp.r#type.as_deref().unwrap_or("any"));
+        }
+        if !inputs.is_empty() {
+            println!("  ─────────────");
+            for (k, v) in inputs {
+                println!("  {} = {}", k, v);
+            }
+        }
+    }
+
+    if let Some(outputs) = &workflow.outputs {
+        println!("\n── 工作流输出 ──");
+        for (key, expr) in outputs {
+            println!("  {}: {}", key, expr);
+        }
+    }
+
+    println!("\n── 步骤列表 ──");
+    for step in &workflow.steps {
+        let deps = step.depends_on.as_ref()
+            .map(|d| d.join(", "))
+            .unwrap_or_else(|| "无".to_string());
+        print!("  {} ({:?})", step.id, step.r#type);
+        if let Some(name) = &step.name {
+            print!(" - {}", name);
+        }
+        print!("  [依赖: {}]", deps);
+        if let Some(timeout) = &step.timeout {
+            print!("  [超时: {}]", timeout);
+        }
+        if let Some(retry) = &step.retry {
+            print!("  [重试: max={}, strategy={:?}]", retry.max_attempts, retry.strategy);
+        }
+        println!();
+
+        match step.r#type {
+            flow_run::core::types::StepType::Http => {
+                if let Some(api) = &step.api {
+                    println!("    API: {} {}", step.method.as_deref().unwrap_or("GET"), api);
+                }
+            }
+            flow_run::core::types::StepType::Shell => {
+                if let Some(cmd) = &step.run {
+                    let preview = if cmd.chars().count() > 80 {
+                        let end: String = cmd.chars().take(77).collect();
+                        format!("{}...", end)
+                    } else {
+                        cmd.clone()
+                    };
+                    println!("    命令: {}", preview);
+                }
+            }
+            flow_run::core::types::StepType::Parallel => {
+                if let Some(sub_steps) = &step.steps {
+                    println!("    子步骤: {} 个", sub_steps.len());
+                    for sub in sub_steps {
+                        println!("      - {} ({:?})", sub.id, sub.r#type);
+                    }
+                }
+                if let Some(max) = step.max_concurrent {
+                    println!("    最大并发: {}", max);
+                }
+            }
+            flow_run::core::types::StepType::Loop => {
+                if let Some(loop_cfg) = &step.r#loop {
+                    println!("    循环: {:?}", loop_cfg);
+                }
+            }
+            flow_run::core::types::StepType::Condition => {
+                if let Some(expr) = &step.expression {
+                    println!("    条件: {}", expr);
+                }
+                if let Some(then) = &step.then_steps {
+                    println!("    then 分支: {} 个步骤", then.len());
+                }
+                if let Some(else_) = &step.else_steps {
+                    println!("    else 分支: {} 个步骤", else_.len());
+                }
+            }
+            flow_run::core::types::StepType::Workflow => {
+                if let Some(wf) = &step.workflow {
+                    println!("    子工作流: {}", wf);
+                }
+            }
+            flow_run::core::types::StepType::Approve => {
+                if let Some(approvers) = &step.approvers {
+                    println!("    审批人: {:?}", approvers);
                 }
             }
         }
     }
+
+    let edge_count: usize = workflow.steps.iter()
+        .filter_map(|s| s.depends_on.as_ref().map(|d| d.len()))
+        .sum();
+
+    println!("\n── DAG 结构 ──");
+    println!("  节点: {} | 边: {}", workflow.steps.len(), edge_count);
+    for step in &workflow.steps {
+        if let Some(deps) = &step.depends_on {
+            for dep in deps {
+                println!("  {} ──→ {}", dep, step.id);
+            }
+        }
+    }
+
+    println!("\n── 拓扑排序（执行计划）──");
+    println!("  共 {} 个批次", batches.len());
+    for (i, batch) in batches.iter().enumerate() {
+        let parallel_tag = if batch.len() > 1 { " (并行)" } else { "" };
+        println!("  批次 {}:{} {} 个步骤", i + 1, parallel_tag, batch.len());
+        for step_id in batch {
+            let step = workflow.steps.iter().find(|s| &s.id == step_id);
+            if let Some(s) = step {
+                let name_suffix = s.name.as_ref().map(|n| format!(" - {}", n)).unwrap_or_default();
+                    let out_edges: Vec<&str> = workflow.steps.iter()
+                        .filter_map(|s| {
+                            let is_child = s.depends_on.as_ref()
+                                .map_or(false, |d| d.iter().any(|dep| *dep == *step_id));
+                            if is_child { Some(s.id.as_str()) } else { None }
+                        })
+                        .collect();
+                    let out_str = if out_edges.is_empty() { "无".to_string() } else { out_edges.join(", ") };
+                    println!("    ├─ {}{:?}{} [out→ {}]",
+                        s.id, s.r#type, name_suffix, out_str
+                    );
+            }
+        }
+    }
+
+    println!("\n══════════════════════════════════════════════");
+    println!("  以上为模拟执行，未实际运行任何步骤");
+    println!("══════════════════════════════════════════════");
+
     Ok(())
 }
 
