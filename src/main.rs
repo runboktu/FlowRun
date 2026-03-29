@@ -1,6 +1,11 @@
 use clap::Parser;
 use flow_run::cli::commands::{Args, Commands};
+use flow_run::core::context::ExecutionContext;
+use flow_run::core::dag::{DagScheduler, Scheduler};
 use flow_run::core::parser::WorkflowParser;
+use flow_run::core::types::{StepStatus, WorkflowStatus};
+use flow_run::utils::checkpoint::CheckpointManager;
+use std::collections::HashMap;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -14,28 +19,33 @@ async fn main() -> anyhow::Result<()> {
     let cli = Args::parse();
 
     match cli.command {
-        Commands::Run { mode: _, input, json, dry_run } => {
+        Commands::Run { input, json, dry_run, .. } => {
             let workflow = WorkflowParser::from_file(&cli.workflow)?;
-
-            if json {
-                println!("{}", serde_json::to_string_pretty(&workflow)?);
+            if dry_run {
+                dry_run_workflow(&workflow, &cli.workflow, &input, json)
             } else {
-                if dry_run {
-                    println!("试运行模式: {}", workflow.name);
-                } else {
-                    println!("工作流: {}", workflow.name);
-                    println!("步骤数: {}", workflow.steps.len());
-                    println!("输入参数: {:?}", input);
+                let result = run_workflow(&workflow, &input).await?;
+                print_result(&result, json);
+                if !matches!(result.status, WorkflowStatus::Success) {
+                    std::process::exit(1);
                 }
+                Ok(())
             }
         }
 
         Commands::Resume { checkpoint_id, input, json } => {
-            println!("从检查点恢复: {}", checkpoint_id);
-            println!("输入参数: {:?}", input);
-            if json {
-                println!("{{\"checkpoint_id\": \"{}\", \"status\": \"resumed\"}}", checkpoint_id);
+            let workflow = WorkflowParser::from_file(&cli.workflow)?;
+            let result = resume_workflow(&workflow, &checkpoint_id, &input).await?;
+            print_result(&result, json);
+            if !matches!(result.status, WorkflowStatus::Success) {
+                std::process::exit(1);
             }
+            Ok(())
+        }
+
+        Commands::DryRun { input, json } => {
+            let workflow = WorkflowParser::from_file(&cli.workflow)?;
+            dry_run_workflow(&workflow, &cli.workflow, &input, json)
         }
 
         Commands::Validate { show_dag, json } => {
@@ -58,17 +68,7 @@ async fn main() -> anyhow::Result<()> {
                     std::process::exit(1);
                 }
             }
-        }
-
-        Commands::DryRun { input, json } => {
-            let workflow = WorkflowParser::from_file(&cli.workflow)?;
-            if json {
-                println!("{}", serde_json::to_string_pretty(&workflow)?);
-            } else {
-                println!("试运行模式: {}", workflow.name);
-                println!("步骤数: {}", workflow.steps.len());
-                println!("输入参数: {:?}", input);
-            }
+            Ok(())
         }
 
         Commands::Checkpoint { action } => {
@@ -124,6 +124,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }
+            Ok(())
         }
 
         Commands::History { limit, status, failed, json } => {
@@ -139,6 +140,7 @@ async fn main() -> anyhow::Result<()> {
                     println!("  只显示失败");
                 }
             }
+            Ok(())
         }
 
         Commands::Schema { output, pretty } => {
@@ -153,8 +155,152 @@ async fn main() -> anyhow::Result<()> {
                     println!("{}", schema);
                 }
             }
+            Ok(())
         }
     }
+}
 
+async fn run_workflow(
+    workflow: &flow_run::core::types::WorkflowDefinition,
+    inputs: &[(String, String)],
+) -> anyhow::Result<flow_run::core::types::WorkflowResult> {
+    let dag = DagScheduler::new(workflow.steps.clone())?;
+    let checkpoint_dir = std::env::temp_dir().join(format!("flow-run-{}", std::process::id()));
+    let checkpoint_manager = CheckpointManager::new(checkpoint_dir)?;
+    let config = workflow.config.clone().unwrap_or_default();
+    let scheduler = Scheduler::new(dag, config, checkpoint_manager);
+
+    let mut input_map = HashMap::new();
+    for (k, v) in inputs {
+        input_map.insert(k.clone(), serde_json::json!(v));
+    }
+    let context = ExecutionContext::new(workflow, input_map);
+    scheduler.set_context(context).await;
+
+    if let Some(outputs) = &workflow.outputs {
+        let outputs_map: HashMap<String, String> = outputs
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        scheduler.set_outputs(outputs_map).await;
+    }
+
+    Ok(scheduler.run().await?)
+}
+
+async fn resume_workflow(
+    workflow: &flow_run::core::types::WorkflowDefinition,
+    checkpoint_id: &str,
+    inputs: &[(String, String)],
+) -> anyhow::Result<flow_run::core::types::WorkflowResult> {
+    let dag = DagScheduler::new(workflow.steps.clone())?;
+    let checkpoint_dir = std::env::temp_dir().join("flow-run-checkpoints");
+    std::fs::create_dir_all(&checkpoint_dir)?;
+    let checkpoint_manager = CheckpointManager::new(checkpoint_dir)?;
+
+    let config = workflow.config.clone().unwrap_or_default();
+    let scheduler = Scheduler::new(dag, config, checkpoint_manager);
+
+    let mut input_map = HashMap::new();
+    for (k, v) in inputs {
+        input_map.insert(k.clone(), serde_json::json!(v));
+    }
+    let context = ExecutionContext::new(workflow, input_map);
+    scheduler.set_context(context).await;
+
+    if let Some(outputs) = &workflow.outputs {
+        let outputs_map: HashMap<String, String> = outputs
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        scheduler.set_outputs(outputs_map).await;
+    }
+
+    Ok(scheduler.resume(checkpoint_id).await?)
+}
+
+fn dry_run_workflow(
+    workflow: &flow_run::core::types::WorkflowDefinition,
+    workflow_file: &std::path::Path,
+    inputs: &[(String, String)],
+    json: bool,
+) -> anyhow::Result<()> {
+    let dag = DagScheduler::new(workflow.steps.clone())?;
+    let batches = dag.topological_sort()?;
+
+    if json {
+        let plan = serde_json::json!({
+            "name": workflow.name,
+            "steps": workflow.steps.len(),
+            "batches": batches,
+            "inputs": inputs.iter().map(|(k, v)| (k, v)).collect::<HashMap<_, _>>(),
+        });
+        println!("{}", serde_json::to_string_pretty(&plan)?);
+    } else {
+        println!("工作流: {}", workflow.name);
+        println!("文件: {}", workflow_file.display());
+        println!("步骤数: {}", workflow.steps.len());
+        println!("输入参数: {:?}", inputs);
+        println!("\n执行计划:");
+        for (i, batch) in batches.iter().enumerate() {
+            println!("  批次 {}:", i + 1);
+            for step_id in batch {
+                let step = workflow.steps.iter().find(|s| &s.id == step_id);
+                if let Some(s) = step {
+                    println!("    - {} ({:?})", s.id, s.r#type);
+                }
+            }
+        }
+    }
     Ok(())
+}
+
+fn print_result(result: &flow_run::core::types::WorkflowResult, json: bool) {
+    if json {
+        println!("{}", serde_json::to_string_pretty(result).unwrap_or_default());
+        return;
+    }
+
+    println!("\n执行结果: {:?}", result.status);
+    println!("步骤结果:");
+    for step in &result.steps {
+        let icon = match step.status {
+            StepStatus::Success => "OK",
+            StepStatus::Failed => "FAIL",
+            StepStatus::Skipped => "SKIP",
+            StepStatus::Pending => "PEND",
+            StepStatus::Running => "RUN",
+        };
+        print!("  [{}] {}", icon, step.step_id);
+        if let Some(output) = &step.output {
+            if let Some(stdout) = output.get("stdout").and_then(|v| v.as_str()) {
+                let trimmed = stdout.replace('\n', " ").trim().to_string();
+                if !trimmed.is_empty() {
+                    print!("  {}", &trimmed[..trimmed.len().min(120)]);
+                }
+            }
+            if let Some(status_code) = output.get("status_code") {
+                print!("  status={}", status_code);
+            }
+        }
+        println!();
+    }
+
+    println!("\n指标:");
+    println!("  总步骤: {} | 成功: {} | 失败: {} | 跳过: {}",
+        result.metrics.total_steps,
+        result.metrics.success_steps,
+        result.metrics.failed_steps,
+        result.metrics.skipped_steps,
+    );
+    println!("  耗时: {}ms", result.metrics.total_duration_ms);
+
+    if let Some(outputs) = &result.outputs {
+        if !outputs.is_empty() {
+            println!("\n工作流输出:");
+            for (key, value) in outputs {
+                println!("  {}: {}", key, value);
+            }
+        }
+    }
 }

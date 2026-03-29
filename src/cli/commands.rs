@@ -71,8 +71,7 @@ pub enum Commands {
         json: bool,
     },
 
-    /// 模拟执行工作流（dry-run 的别名）
-    #[command(alias = "dry-run")]
+    /// 模拟执行工作流
     DryRun {
         /// 输入参数（格式：--input key=value）
         #[arg(short, long, value_parser = parse_key_value)]
