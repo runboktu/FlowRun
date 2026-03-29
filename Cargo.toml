@@ -124,5 +124,5 @@ name = "06_template_filters"
 path = "examples/code/06_template_filters.rs"
 
 [[example]]
-name = "checkpoint_demo"
-path = "examples/code/checkpoint_demo.rs"
+name = "12_checkpoint_resume"
+path = "examples/code/12_checkpoint_resume.rs"

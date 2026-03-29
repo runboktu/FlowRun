@@ -1,0 +1,71 @@
+# 检查点恢复示例
+#
+# 这个示例展示 checkpoint 的核心功能：
+# - 工作流执行到一半失败（on_failure: pause）
+# - 从检查点恢复，跳过已完成的步骤，继续执行剩余步骤
+# - CheckpointManager 手动 API（save/load/list/delete）
+#
+# 运行方式：
+#   cargo run --example 12_checkpoint_resume
+#
+# 注意：process_data 步骤依赖外部文件 /tmp/checkpoint_resume_flag，
+#       第一次运行时该文件不存在会失败，示例会自动创建该文件后从检查点恢复。
+
+name: "检查点恢复示例"
+description: "工作流执行到一半失败，从检查点恢复后成功完成"
+
+version: "1.0.0"
+
+steps:
+  # 第一步：准备数据（总会成功）
+  - id: prepare_data
+    name: "准备数据"
+    type: shell
+    run: |
+      echo "[prepare_data] 准备数据..."
+      echo "prepared_at=$(date +%s)" > /tmp/checkpoint_demo_data.txt
+      echo "  -> 数据文件已创建"
+
+  # 第二步：处理数据（依赖外部条件，模拟可恢复的失败）
+  - id: process_data
+    name: "处理数据"
+    type: shell
+    depends_on:
+      - prepare_data
+    run: |
+      echo "[process_data] 处理数据（需要外部条件满足）..."
+      if [ -f /tmp/checkpoint_resume_flag ]; then
+        echo "  -> 条件满足，继续处理"
+        echo "processed=true" >> /tmp/checkpoint_demo_data.txt
+        echo "  -> 处理完成"
+      else
+        echo "  -> 条件不满足（缺少 flag 文件），模拟失败"
+        rm -f /tmp/checkpoint_demo_data.txt
+        exit 1
+      fi
+
+  # 第三步：验证结果
+  - id: validate_result
+    name: "验证结果"
+    type: shell
+    depends_on:
+      - process_data
+    run: |
+      echo "[validate_result] 验证处理结果..."
+      echo "  -> 数据内容:"
+      cat /tmp/checkpoint_demo_data.txt
+      echo "  -> 验证通过"
+
+  # 第四步：清理
+  - id: cleanup
+    name: "清理"
+    type: shell
+    depends_on:
+      - validate_result
+    run: |
+      echo "[cleanup] 清理临时文件..."
+      rm -f /tmp/checkpoint_demo_data.txt /tmp/checkpoint_resume_flag
+      echo "  -> 清理完成，工作流结束！"
+
+config:
+  on_failure: pause
