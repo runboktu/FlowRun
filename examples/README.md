@@ -152,10 +152,13 @@ config:
 
 ## Rust 代码示例
 
-`code/` 目录包含 Rust 代码示例，展示如何在代码中使用 flow-run 库。
+`code/` 目录包含两类 Rust 代码示例：
+
+### API 演示示例
+
+展示 flow-run 各个核心 API 的独立用法。
 
 ```bash
-# 运行代码示例
 cargo run --example 01_load_workflow
 cargo run --example 02_execution_context
 cargo run --example 03_dag_scheduler
@@ -164,8 +167,6 @@ cargo run --example 05_retry_engine
 cargo run --example 06_checkpoint
 cargo run --example 07_full_execution
 ```
-
-### 代码示例说明
 
 | 示例 | 说明 | 关键 API |
 |:---|:---|:---|
@@ -176,3 +177,33 @@ cargo run --example 07_full_execution
 | `05_retry_engine` | 重试引擎使用 | `RetryEngine::new`, `execute`, `calculate_delay` |
 | `06_checkpoint` | 检查点管理 | `CheckpointManager::new`, `save`, `load`, `list` |
 | `07_full_execution` | 完整工作流执行 | 综合使用所有 API |
+
+### YAML 工作流示例
+
+加载对应的 YAML 工作流文件并完整执行，适合学习工作流引擎的端到端使用。
+
+```bash
+cargo run --example 02_basic_shell          # Shell 命令执行
+cargo run --example 03_step_dependencies    # 步骤依赖和数据流
+cargo run --example 04_parallel_execution   # 并行执行与限流
+cargo run --example 05_retry_strategy       # 错误处理与重试
+cargo run --example 06_template_filters     # 模板表达式与过滤器
+cargo run --example 07_full_execution       # 条件分支
+cargo run --example 08_condition_branch     # 条件分支
+cargo run --example 09_subworkflow          # 子工作流
+cargo run --example 10_advanced_approval    # 人工审批
+cargo run --example 11_comprehensive_cicd   # 完整 CI/CD 流水线
+```
+
+| 示例 | 对应 YAML | 说明 |
+|:---|:---|:---|
+| `02_basic_shell` | `02_basic_shell.yaml` | Shell 命令执行、步骤依赖、命令输出 |
+| `03_step_dependencies` | `03_basic_dependencies.yaml` | DAG 自动并行调度、步骤间数据传递 |
+| `04_parallel_execution` | `04_intermediate_parallel.yaml` | parallel 类型、max_concurrent 限流 |
+| `05_retry_strategy` | `05_intermediate_retry.yaml` | 重试策略、退避算法、expect 验证 |
+| `06_template_filters` | `06_intermediate_templates.yaml` | 过滤器链、条件表达式、数组操作 |
+| `07_full_execution` | `07_advanced_loop.yaml` | 循环执行 |
+| `08_condition_branch` | `08_advanced_condition.yaml` | 条件分支 |
+| `09_subworkflow` | `09_advanced_subworkflow.yaml` | 子工作流组合、模块化设计 |
+| `10_advanced_approval` | `10_advanced_approval.yaml` | 人工审批、自动审批条件 |
+| `11_comprehensive_cicd` | `11_comprehensive_cicd.yaml` | 完整 CI/CD 流水线 |

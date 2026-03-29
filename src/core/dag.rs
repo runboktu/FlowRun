@@ -834,6 +834,7 @@ impl Scheduler {
         for (step_id, result) in step_outputs {
             ctx.step_outputs.insert(step_id, result);
         }
+        drop(ctx);
 
         let batches = self.dag.topological_sort()?;
         let mut all_results: Vec<StepResult> = checkpoint_data

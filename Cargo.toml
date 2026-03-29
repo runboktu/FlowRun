@@ -102,3 +102,27 @@ path = "examples/code/10_advanced_approval.rs"
 [[example]]
 name = "11_comprehensive_cicd"
 path = "examples/code/11_comprehensive_cicd.rs"
+
+[[example]]
+name = "02_basic_shell"
+path = "examples/code/02_basic_shell.rs"
+
+[[example]]
+name = "03_step_dependencies"
+path = "examples/code/03_step_dependencies.rs"
+
+[[example]]
+name = "04_parallel_execution"
+path = "examples/code/04_parallel_execution.rs"
+
+[[example]]
+name = "05_retry_strategy"
+path = "examples/code/05_retry_strategy.rs"
+
+[[example]]
+name = "06_template_filters"
+path = "examples/code/06_template_filters.rs"
+
+[[example]]
+name = "checkpoint_demo"
+path = "examples/code/checkpoint_demo.rs"
