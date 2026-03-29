@@ -5,9 +5,13 @@ edition = "2021"
 description = "专为 AI Agent 设计的声明式工作流引擎"
 license = "MIT"
 
+[features]
+default = ["cli"]
+cli = ["clap", "tracing-subscriber"]
+
 [dependencies]
-# CLI 框架
-clap = { version = "4.4", features = ["derive"] }
+# CLI 框架 (optional)
+clap = { version = "4.4", features = ["derive"], optional = true }
 
 # 序列化
 serde = { version = "1.0", features = ["derive"] }
@@ -37,7 +41,7 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # 日志
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"], optional = true }
 
 # 速率限制
 governor = "0.6"
