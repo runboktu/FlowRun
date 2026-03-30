@@ -9,8 +9,12 @@ license = "MIT"
 default = ["cli"]
 cli = ["clap", "tracing-subscriber"]
 
+[[bin]]
+name = "flow-run"
+required-features = ["cli"]
+
 [dependencies]
-# CLI 框架 (optional)
+# CLI 框架 (optional — 库用户可 default-features = false 跳过)
 clap = { version = "4.4", features = ["derive"], optional = true }
 
 # 序列化
