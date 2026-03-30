@@ -1,4 +1,5 @@
 use crate::core::types::*;
+use std::path::Path;
 
 /// 打印工作流执行结果
 pub fn print_result(result: &WorkflowResult, json: bool) {
@@ -56,7 +57,7 @@ pub fn print_result(result: &WorkflowResult, json: bool) {
 }
 
 /// 打印执行计划（dry-run 输出）
-pub fn print_execution_plan(plan: &ExecutionPlan, json: bool, workflow_file: &std::path::Path) {
+pub fn print_execution_plan(plan: &ExecutionPlan, json: bool, workflow_file: &Path) {
     if json {
         println!("{}", serde_json::to_string_pretty(plan).unwrap_or_default());
         return;

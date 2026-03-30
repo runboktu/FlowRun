@@ -164,4 +164,18 @@ steps:
         assert_eq!(plan.dag_edges[0].from, "step1");
         assert_eq!(plan.dag_edges[0].to, "step2");
     }
+    #[test]
+    fn test_runner_with_checkpoint_dir() {
+        let yaml = r#"
+name: "test_workflow"
+steps:
+  - id: "step1"
+    type: "shell"
+    run: "echo hello"
+"#;
+        let workflow = WorkflowParser::from_str(yaml).unwrap();
+        let runner = FlowRunner::new(workflow)
+            .with_checkpoint_dir(PathBuf::from("/tmp/custom-checkpoints"));
+        assert_eq!(runner.checkpoint_dir, PathBuf::from("/tmp/custom-checkpoints"));
+    }
 }

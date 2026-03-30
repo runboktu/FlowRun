@@ -14,8 +14,8 @@ pub mod core;
 pub mod executors;
 pub mod utils;
 
-// Re-export 核心类型，方便库用户使用
+// Re-export 核心类型，方便库用户直接 use flow_run::Xxx
+pub use core::parser::WorkflowParser;
 pub use core::runner::FlowRunner;
 pub use core::types::*;
-pub use core::parser::WorkflowParser;
 pub use utils::error::WorkflowError;
