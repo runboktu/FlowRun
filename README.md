@@ -1,170 +1,172 @@
+[中文](./README-zh.md) | English
+
 # flow-run
 
-专为 AI Agent 设计的声明式工作流引擎。通过 YAML 定义工作流，支持 HTTP 请求、Shell 命令、条件分支、循环执行、子工作流组合、人工审批等功能。
+A declarative workflow engine designed for AI Agents. Define workflows via YAML, with support for HTTP requests, Shell commands, conditional branching, loops, sub-workflow composition, manual approval, and more.
 
-## 安装
+## Installation
 
 ```bash
 cargo build --release
-# 二进制文件位于 target/release/flow-run
+# Binary located at target/release/flow-run
 ```
 
-## 命令概览
+## Command Overview
 
 ```
 flow-run [OPTIONS] <WORKFLOW_FILE> <COMMAND>
 
 Commands:
-  run         执行工作流
-  resume      从检查点恢复工作流执行
-  validate    验证工作流定义
-  dry-run     模拟执行工作流（显示执行计划，不实际运行）
-  checkpoint  检查点管理
-  history     查看执行历史
-  schema      输出工作流定义的 JSON Schema
+  run         Execute a workflow
+  resume      Resume workflow execution from a checkpoint
+  validate    Validate a workflow definition
+  dry-run     Simulate workflow execution (show execution plan without running)
+  checkpoint  Checkpoint management
+  history     View execution history
+  schema      Output JSON Schema for workflow definitions
 
 Options:
-  -v, --verbose          启用详细日志输出
-  -C, --config <CONFIG>  指定配置文件
+  -v, --verbose          Enable verbose logging
+  -C, --config <CONFIG>  Specify a configuration file
 ```
 
-## 子命令详解
+## Subcommand Details
 
-### run — 执行工作流
+### run — Execute Workflow
 
-解析 YAML 工作流文件，构建 DAG 调度图，按依赖顺序执行所有步骤。
+Parse the YAML workflow file, build a DAG scheduling graph, and execute all steps in dependency order.
 
 ```bash
 flow-run <workflow.yaml> run [OPTIONS]
 ```
 
-**参数：**
+**Parameters:**
 
-| 参数 | 简写 | 说明 |
+| Parameter | Short | Description |
 |:---|:---|:---|
-| `--input <key=value>` | `-i` | 传入工作流输入参数，可多次使用 |
-| `--json` | | 以 JSON 格式输出完整执行结果 |
-| `--dry-run` | | 模拟执行，仅解析和展示执行计划 |
-| `--normal` | | 普通执行模式（默认） |
-| `--async-mode` | | 异步执行模式 |
-| `--daemon` | | 守护进程模式 |
+| `--input <key=value>` | `-i` | Pass input parameters to the workflow (can be used multiple times) |
+| `--json` | | Output complete execution result in JSON format |
+| `--dry-run` | | Simulate execution — parse and display the execution plan only |
+| `--normal` | | Normal execution mode (default) |
+| `--async-mode` | | Asynchronous execution mode |
+| `--daemon` | | Daemon mode |
 
-**示例：**
+**Examples:**
 
 ```bash
-# 执行 HTTP 工作流
+# Execute an HTTP workflow
 flow-run examples/01_basic_http.yaml run \
   --input api_url=https://jsonplaceholder.typicode.com
 
-# 执行 Shell 工作流，传入多个参数
+# Execute a Shell workflow with multiple parameters
 flow-run examples/02_basic_shell.yaml run \
   --input project_name=myapp \
   --input environment=production
 
-# JSON 格式输出（适合程序解析）
+# JSON output (suitable for programmatic parsing)
 flow-run examples/01_basic_http.yaml run \
   --input api_url=https://jsonplaceholder.typicode.com \
   --json
 
-# 模拟执行（不实际运行步骤）
+# Simulate execution (does not actually run steps)
 flow-run examples/02_basic_shell.yaml run --dry-run \
   --input project_name=myapp
 
-# 启用详细日志
+# Enable verbose logging
 flow-run -v examples/01_basic_http.yaml run \
   --input api_url=https://jsonplaceholder.typicode.com
 ```
 
-**输出示例（人可读）：**
+**Output Example (human-readable):**
 
 ```
-执行结果: Success
-步骤结果:
+Result: Success
+Step Results:
   [OK] fetch_user
-  [OK] display_user  用户名: Bret, 邮箱: Sincere@april.biz
+  [OK] display_user  Username: Bret, Email: Sincere@april.biz
 
-指标:
-  总步骤: 2 | 成功: 2 | 失败: 0 | 跳过: 0
-  耗时: 1835ms
+Metrics:
+  Total steps: 2 | Success: 2 | Failed: 0 | Skipped: 0
+  Duration: 1835ms
 
-工作流输出:
+Workflow Outputs:
   user_name: "Bret"
   user_email: "Sincere@april.biz"
 ```
 
-**退出码：**
-- `0` — 工作流执行成功
-- `1` — 工作流执行失败或 YAML 解析错误
+**Exit Codes:**
+- `0` — Workflow executed successfully
+- `1` — Workflow execution failed or YAML parse error
 
 ---
 
-### dry-run — 模拟执行
+### dry-run — Simulate Execution
 
-解析工作流文件，计算 DAG 拓扑排序，展示完整的执行分析报告，但不实际执行任何步骤。
+Parse the workflow file, compute the DAG topological sort, and display a complete execution analysis report without actually executing any steps.
 
 ```bash
 flow-run <workflow.yaml> dry-run [OPTIONS]
 ```
 
-**参数：**
+**Parameters:**
 
-| 参数 | 简写 | 说明 |
+| Parameter | Short | Description |
 |:---|:---|:---|
-| `--input <key=value>` | `-i` | 传入输入参数（仅用于展示） |
-| `--json` | | 以 JSON 格式输出执行计划 |
+| `--input <key=value>` | `-i` | Pass input parameters (for display only) |
+| `--json` | | Output execution plan in JSON format |
 
-**示例：**
+**Example:**
 
 ```bash
 flow-run examples/11_comprehensive_cicd.yaml dry-run
 ```
 
-**输出内容：**
+**Output Contents:**
 
-- 工作流基本信息（名称、版本、描述、步骤数、循环依赖检查）
-- 全局配置（超时、失败策略、检查点、最大并发、重试策略）
-- 输入参数定义（名称、类型、是否必填）和实际传入值
-- 工作流输出定义和模板表达式
-- 步骤列表（类型、依赖、超时、重试配置）
-  - HTTP 步骤：显示 API 地址和方法
-  - Shell 步骤：显示命令预览
-  - Parallel 步骤：显示子步骤和最大并发数
-  - Loop 步骤：显示循环配置
-  - Condition 步骤：显示条件表达式和分支数
-  - Workflow 步骤：显示子工作流路径
-  - Approve 步骤：显示审批人列表
-- DAG 结构（节点数、边数、所有依赖关系 `A ──→ B`）
-- 拓扑排序执行计划（批次列表、并行标记、步骤出边）
+- Workflow basic info (name, version, description, step count, cycle dependency check)
+- Global configuration (timeout, failure strategy, checkpoint, max concurrency, retry strategy)
+- Input parameter definitions (name, type, required) and actual passed values
+- Workflow output definitions and template expressions
+- Step list (type, dependencies, timeout, retry configuration)
+  - HTTP steps: display API URL and method
+  - Shell steps: display command preview
+  - Parallel steps: display sub-steps and max concurrency
+  - Loop steps: display loop configuration
+  - Condition steps: display condition expression and branch count
+  - Workflow steps: display sub-workflow path
+  - Approve steps: display approver list
+- DAG structure (node count, edge count, all dependency relations `A ──→ B`)
+- Topological sort execution plan (batch list, parallel markers, step outgoing edges)
 
-**输出示例（CI/CD 工作流，关键部分）：**
+**Output Example (CI/CD workflow, key sections):**
 
 ```
 ══════════════════════════════════════════════
-  Dry Run: CI/CD 完整流水线
+  Dry Run: CI/CD Complete Pipeline
 ══════════════════════════════════════════════
-  描述: 一个完整的持续集成/持续部署工作流
-  版本: 1.0.0
-  步骤: 10 个
-  DAG 检查: 无循环依赖
+  Description: A complete CI/CD workflow
+  Version: 1.0.0
+  Steps: 10
+  DAG Check: No cycle dependencies
 
-── 全局配置 ──
-  超时: 30m
-  失败策略: Pause
-  最大并发: 4
+── Global Configuration ──
+  Timeout: 30m
+  Failure Strategy: Pause
+  Max Concurrency: 4
 
-── 拓扑排序（执行计划）──
-  共 8 个批次
-  批次 1: 1 个步骤
-    ├─ checkoutShell - 检出代码 [out→ detect_changes]
-  批次 2: 1 个步骤
-    ├─ detect_changesShell - 检测变更 [out→ build_frontend, build_backend]
-  批次 3: (并行) 2 个步骤
-    ├─ build_frontendShell - 构建前端 [out→ test_parallel, security_scan]
-    ├─ build_backendShell - 构建后端 [out→ test_parallel, security_scan]
+── Topological Sort (Execution Plan) ──
+  8 batches total
+  Batch 1: 1 step
+    ├─ checkout (Shell) - Check out code [out→ detect_changes]
+  Batch 2: 1 step
+    ├─ detect_changes (Shell) - Detect changes [out→ build_frontend, build_backend]
+  Batch 3: (parallel) 2 steps
+    ├─ build_frontend (Shell) - Build frontend [out→ test_parallel, security_scan]
+    ├─ build_backend (Shell) - Build backend [out→ test_parallel, security_scan]
   ...
 
-── DAG 结构 ──
-  节点: 10 | 边: 12
+── DAG Structure ──
+  Nodes: 10 | Edges: 12
   checkout ──→ detect_changes
   detect_changes ──→ build_frontend
   detect_changes ──→ build_backend
@@ -173,159 +175,159 @@ flow-run examples/11_comprehensive_cicd.yaml dry-run
 
 ---
 
-### resume — 从检查点恢复
+### resume — Resume from Checkpoint
 
-加载指定检查点，恢复工作流执行。适用于工作流中途失败（`on_failure: pause`）后，修复问题后从失败点继续执行。
+Load a specified checkpoint and resume workflow execution. Useful when a workflow fails midway (`on_failure: pause`) — fix the issue and continue from the failure point.
 
 ```bash
 flow-run <workflow.yaml> resume --checkpoint-id <ID> [OPTIONS]
 ```
 
-**参数：**
+**Parameters:**
 
-| 参数 | 简写 | 说明 |
+| Parameter | Short | Description |
 |:---|:---|:---|
-| `--checkpoint-id <ID>` | | 要恢复的检查点 ID（必填） |
-| `--input <key=value>` | `-i` | 覆盖输入参数 |
-| `--json` | | 以 JSON 格式输出结果 |
+| `--checkpoint-id <ID>` | | Checkpoint ID to resume from (required) |
+| `--input <key=value>` | `-i` | Override input parameters |
+| `--json` | | Output result in JSON format |
 
-**检查点目录：** 恢复操作在 `/tmp/flow-run-checkpoints` 下查找检查点文件。
+**Checkpoint Directory:** Resume operations look for checkpoint files under `/tmp/flow-run-checkpoints`.
 
-**示例：**
+**Example:**
 
 ```bash
-# 从指定检查点恢复
+# Resume from a specific checkpoint
 flow-run examples/12_checkpoint_resume.yaml resume \
   --checkpoint-id cp_abc123
 ```
 
 ---
 
-### validate — 验证工作流定义
+### validate — Validate Workflow Definition
 
-检查 YAML 文件语法是否正确、DAG 是否存在循环依赖。
+Check YAML syntax correctness and detect DAG cycle dependencies.
 
 ```bash
 flow-run <workflow.yaml> validate [OPTIONS]
 ```
 
-**参数：**
+**Parameters:**
 
-| 参数 | 说明 |
+| Parameter | Description |
 |:---|:---|
-| `--show-dag` | 显示步骤列表和 DAG 结构 |
-| `--json` | 以 JSON 格式输出工作流定义 |
+| `--show-dag` | Display step list and DAG structure |
+| `--json` | Output workflow definition in JSON format |
 
-**示例：**
+**Examples:**
 
 ```bash
-# 验证工作流
+# Validate workflow
 flow-run examples/11_comprehensive_cicd.yaml validate
 
-# 验证并显示 DAG 结构
+# Validate and show DAG structure
 flow-run examples/11_comprehensive_cicd.yaml validate --show-dag
 
-# 输出完整 JSON 定义
+# Output complete JSON definition
 flow-run examples/11_comprehensive_cicd.yaml validate --json
 ```
 
 ---
 
-### checkpoint — 检查点管理
+### checkpoint — Checkpoint Management
 
-管理工作流执行过程中保存的检查点。
+Manage checkpoints saved during workflow execution.
 
 ```bash
 flow-run <workflow.yaml> checkpoint <ACTION>
 ```
 
-**子命令：**
+**Subcommands:**
 
-| 子命令 | 说明 |
+| Subcommand | Description |
 |:---|:---|
-| `list` | 列出所有检查点 |
-| `show <ID>` | 显示检查点详情 |
-| `clean` | 清理检查点 |
+| `list` | List all checkpoints |
+| `show <ID>` | Display checkpoint details |
+| `clean` | Clean up checkpoints |
 
-**list 参数：**
+**list Parameters:**
 
 ```bash
 flow-run <workflow.yaml> checkpoint list [OPTIONS]
-# --verbose, -v    显示详细信息
-# --status <STATUS> 按状态过滤
-# --json           JSON 格式输出
+# --verbose, -v    Show detailed information
+# --status <STATUS> Filter by status
+# --json           JSON format output
 ```
 
-**show 参数：**
+**show Parameters:**
 
 ```bash
 flow-run <workflow.yaml> checkpoint show <CHECKPOINT_ID> [OPTIONS]
-# --steps, -s      显示步骤详情
-# --json           JSON 格式输出
+# --steps, -s      Show step details
+# --json           JSON format output
 ```
 
-**clean 子命令：**
+**clean Subcommand:**
 
 ```bash
-# 按 ID 清理
+# Clean by ID
 flow-run <workflow.yaml> checkpoint clean id <ID1> <ID2> ...
 
-# 清理所有（需确认）
+# Clean all (requires confirmation)
 flow-run <workflow.yaml> checkpoint clean all --confirm
 
-# 清理超过 N 天的
+# Clean checkpoints older than N days
 flow-run <workflow.yaml> checkpoint clean older-than --days 7
 
-# 按状态清理
+# Clean by status
 flow-run <workflow.yaml> checkpoint clean status <STATUS>
 
-# 仅保留最近 N 个
+# Keep only the most recent N
 flow-run <workflow.yaml> checkpoint clean keep --count 5
 ```
 
 ---
 
-### history — 查看执行历史
+### history — View Execution History
 
 ```bash
 flow-run <workflow.yaml> history [OPTIONS]
-# --limit, -l <N>    最大显示条数（默认 20）
-# --status <STATUS>  按状态过滤
-# --failed           只显示失败的执行
-# --json             JSON 格式输出
+# --limit, -l <N>    Maximum number of entries to display (default 20)
+# --status <STATUS>  Filter by status
+# --failed           Show only failed executions
+# --json             JSON format output
 ```
 
 ---
 
-### schema — 输出 JSON Schema
+### schema — Output JSON Schema
 
-输出工作流定义的 JSON Schema，用于编辑器自动补全和校验。
+Output the JSON Schema for workflow definitions, useful for editor autocompletion and validation.
 
 ```bash
 flow-run <workflow.yaml> schema [OPTIONS]
-# --output, -o <PATH>  写入文件
-# --pretty              美化输出
+# --output, -o <PATH>  Write to file
+# --pretty              Pretty-print output
 ```
 
-**示例：**
+**Examples:**
 
 ```bash
-# 输出到终端
+# Output to terminal
 flow-run examples/01_basic_http.yaml schema --pretty
 
-# 写入文件（供编辑器使用）
+# Write to file (for editor use)
 flow-run examples/01_basic_http.yaml schema -o workflow-schema.json
 ```
 
 ---
 
-## 工作流 YAML 语法
+## Workflow YAML Syntax
 
-### 基本结构
+### Basic Structure
 
 ```yaml
-name: "工作流名称"
-description: "工作流描述"
+name: "Workflow Name"
+description: "Workflow Description"
 version: "1.0.0"
 
 inputs:
@@ -335,118 +337,118 @@ inputs:
 
 steps:
   - id: step_id
-    name: "步骤名称"
+    name: "Step Name"
     type: http          # http / shell / parallel / loop / condition / workflow / approve
-    # ... 步骤配置
+    # ... step configuration
 
 outputs:
   result_key: "${{ steps.step_id.output.path }}"
 ```
 
-### 步骤类型
+### Step Types
 
-| 类型 | 说明 | 主要配置 |
+| Type | Description | Key Configuration |
 |:---|:---|:---|
-| `http` | HTTP 请求 | `api`, `method`, `headers`, `body` |
-| `shell` | Shell 命令 | `run`, `env`, `safe_mode` |
-| `parallel` | 并行执行 | `steps`, `max_concurrent` |
-| `loop` | 循环执行 | `loop`, `do_steps` |
-| `condition` | 条件分支 | `expression`, `then_steps`, `else_steps` |
-| `workflow` | 子工作流 | `workflow`, `inputs`, `error_strategy` |
-| `approve` | 人工审批 | `message`, `approvers`, `auto_approve_on` |
+| `http` | HTTP request | `api`, `method`, `headers`, `body` |
+| `shell` | Shell command | `run`, `env`, `safe_mode` |
+| `parallel` | Parallel execution | `steps`, `max_concurrent` |
+| `loop` | Loop execution | `loop`, `do_steps` |
+| `condition` | Conditional branch | `expression`, `then_steps`, `else_steps` |
+| `workflow` | Sub-workflow | `workflow`, `inputs`, `error_strategy` |
+| `approve` | Manual approval | `message`, `approvers`, `auto_approve_on` |
 
-### 模板表达式
+### Template Expressions
 
 ```yaml
-# 变量引用
+# Variable references
 ${{ inputs.variable_name }}
 ${{ steps.step_id.output_name }}
 ${{ variables.custom_var }}
 
-# 路径访问
+# Path access
 ${{ steps.fetch.response.body.data }}
 ${{ steps.fetch.response.body.items[0].name }}
 
-# 过滤器链
+# Filter chains
 ${{ steps.fetch.response.body.name | uppercase }}
 ${{ steps.fetch.response.body.name | truncate(10) }}
 ${{ variables.items | join(', ') }}
 
-# 条件表达式
+# Conditional expressions
 ${{ inputs.env || 'development' }}
 ```
 
-### 内置过滤器
+### Built-in Filters
 
-| 过滤器 | 说明 | 示例 |
+| Filter | Description | Example |
 |:---|:---|:---|
-| `uppercase` | 转大写 | `hello` → `HELLO` |
-| `lowercase` | 转小写 | `HELLO` → `hello` |
-| `trim` | 去空格 | ` hello ` → `hello` |
-| `default(v)` | 默认值 | `null` → `v` |
-| `length` | 长度 | `[1,2,3]` → `3` |
-| `slice(s,e)` | 切片 | `[1,2,3] \| slice(0,2)` → `[1,2]` |
-| `first` | 首元素 | `[1,2,3]` → `1` |
-| `last` | 尾元素 | `[1,2,3]` → `3` |
-| `join(sep)` | 拼接 | `[a,b] \| join('-')` → `a-b` |
-| `split(sep)` | 分割 | `a-b \| split('-')` → `[a,b]` |
-| `replace(o,n)` | 替换 | `hello \| replace(l,L)` → `heLLo` |
-| `truncate(n)` | 截断 | `longtext \| truncate(5)` → `long...` |
-| `to_json` | 转 JSON | `{a:1}` → `'{"a":1}'` |
-| `from_json` | 解析 JSON | `'{"a":1}'` → `{a:1}` |
+| `uppercase` | Convert to uppercase | `hello` → `HELLO` |
+| `lowercase` | Convert to lowercase | `HELLO` → `hello` |
+| `trim` | Strip whitespace | ` hello ` → `hello` |
+| `default(v)` | Default value | `null` → `v` |
+| `length` | Length | `[1,2,3]` → `3` |
+| `slice(s,e)` | Slice | `[1,2,3] \| slice(0,2)` → `[1,2]` |
+| `first` | First element | `[1,2,3]` → `1` |
+| `last` | Last element | `[1,2,3]` → `3` |
+| `join(sep)` | Join | `[a,b] \| join('-')` → `a-b` |
+| `split(sep)` | Split | `a-b \| split('-')` → `[a,b]` |
+| `replace(o,n)` | Replace | `hello \| replace(l,L)` → `heLLo` |
+| `truncate(n)` | Truncate | `longtext \| truncate(5)` → `long...` |
+| `to_json` | To JSON | `{a:1}` → `'{"a":1}'` |
+| `from_json` | Parse JSON | `'{"a":1}'` → `{a:1}` |
 
 ---
 
-## 示例工作流
+## Example Workflows
 
-完整示例位于 `examples/` 目录：
+Complete examples are in the `examples/` directory:
 
 ```bash
-# HTTP 请求
+# HTTP request
 flow-run examples/01_basic_http.yaml run \
   --input api_url=https://jsonplaceholder.typicode.com
 
-# Shell 命令
+# Shell command
 flow-run examples/02_basic_shell.yaml run \
   --input project_name=myapp --input environment=staging
 
-# 步骤依赖
+# Step dependencies
 flow-run examples/03_basic_dependencies.yaml run
 
-# 并行执行
+# Parallel execution
 flow-run examples/04_intermediate_parallel.yaml run
 
-# 重试策略
+# Retry strategy
 flow-run examples/05_intermediate_retry.yaml run
 
-# 模板表达式
+# Template expressions
 flow-run examples/06_intermediate_templates.yaml run
 
-# 循环执行
+# Loop execution
 flow-run examples/07_advanced_loop.yaml run
 
-# 条件分支
+# Conditional branching
 flow-run examples/08_advanced_condition.yaml run
 
-# 子工作流
+# Sub-workflow
 flow-run examples/09_advanced_subworkflow.yaml run
 
-# 人工审批
+# Manual approval
 flow-run examples/10_advanced_approval.yaml run
 
-# CI/CD 流水线
+# CI/CD pipeline
 flow-run examples/11_comprehensive_cicd.yaml run
 
-# 检查点保存与恢复
+# Checkpoint save and resume
 flow-run examples/12_checkpoint_resume.yaml run
 ```
 
-Rust 代码示例见 [`examples/README.md`](examples/README.md)。
+For Rust code examples, see [`examples/README.md`](examples/README.md).
 
-## 环境变量
+## Environment Variables
 
 ```bash
-# 控制日志级别
+# Control log level
 RUST_LOG=debug flow-run examples/01_basic_http.yaml run
 RUST_LOG=flow_run=trace flow-run examples/01_basic_http.yaml run
 ```
