@@ -592,6 +592,7 @@ mod tests {
             steps: vec![],
             on: None,
             trigger: None,
+            variables: None,
         };
 
         let mut inputs = HashMap::new();
@@ -668,6 +669,7 @@ mod tests {
             steps: vec![],
             on: None,
             trigger: None,
+            variables: None,
         };
 
         let mut inputs = HashMap::new();
@@ -714,6 +716,7 @@ mod tests {
             steps: vec![],
             on: None,
             trigger: None,
+            variables: None,
         };
 
         let mut inputs = HashMap::new();
