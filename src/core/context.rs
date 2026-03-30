@@ -542,6 +542,7 @@ mod tests {
             steps: vec![],
             on: None,
             trigger: None,
+            variables: None,
         };
 
         let context = ExecutionContext::new(&workflow, inputs);
@@ -645,6 +646,7 @@ mod tests {
             steps: vec![],
             on: None,
             trigger: None,
+            variables: None,
         };
 
         let mut context = ExecutionContext::new(&workflow, HashMap::new());

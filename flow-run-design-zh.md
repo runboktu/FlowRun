@@ -1,33 +1,33 @@
-[中文](./flow-run-design-zh.md) | English
+中文 | [English](./flow-run-design.md)
 
-# flow-run — Declarative Workflow Engine Detailed Design Document
+# flow-run — 声明式工作流引擎详细设计方案
 
-## 1. Project Overview
+## 1. 项目概述
 
-### 1.1 Positioning
+### 1.1 定位
 
-`flow-run` is a declarative workflow engine designed specifically for AI Agents. It addresses the core pain points Agents face when executing multi-step tasks:
-- Lack of orchestration capabilities, making dependency management between steps difficult
-- Having to retry from scratch after failure, wasting already-completed work
-- Inability to execute independent steps in parallel
-- Lack of conditional branching and loop support
-- Inconsistent output formats, making parsing difficult for Agents
+`flow-run` 是专为 AI Agent 设计的声明式工作流引擎。它解决了 Agent 执行多步骤任务时的核心痛点：
+- 缺乏编排能力，步骤间依赖管理困难
+- 失败后需从头重试，浪费已完成的工作
+- 无法并行执行无依赖的步骤
+- 缺乏条件分支和循环支持
+- 输出格式不一致，Agent 解析困难
 
-### 1.2 Design Principles
+### 1.2 设计原则
 
-| Principle | Description |
+| 原则 | 说明 |
 |:---|:---|
-| Declarative First | Define workflows in YAML, not code |
-| JSON Native | All output defaults to JSON, no --json flag needed |
-| DAG Orchestration | Auto-resolve dependencies, execute independent steps in parallel |
-| Checkpoints | Resume from breakpoint after failure, no wasted work |
-| Conditional Branching | Supports if/else logic for different scenarios |
-| Loops | Supports array iteration, conditional loops, and range loops |
-| Agent Friendly | Non-interactive, structured error codes, context window friendly |
+| 声明式优先 | 用 YAML 定义工作流，而非编写代码 |
+| JSON 原生 | 所有输出默认 JSON，无需 --json 标志 |
+| DAG 编排 | 自动解析依赖，无依赖步骤并行执行 |
+| 检查点 | 失败后从断点恢复，不浪费已完成的工作 |
+| 条件分支 | 支持 if/else 逻辑，适应不同场景 |
+| 循环 | 支持遍历数组、条件循环、范围循环 |
+| Agent 友好 | 非交互式、结构化错误码、上下文窗口友好 |
 
 ---
 
-## 2. System Architecture
+## 2. 系统架构
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -35,7 +35,7 @@
 │                                                                             │
 │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐  │
 │  │   Parser    │───▶│  Validator  │───▶│  Scheduler  │───▶│  Executor   │  │
-│  │ (YAML Parse) │    │ (DAG Validate) │    │  (Schedule)  │    │  (Execute)   │  │
+│  │  (YAML解析) │    │  (DAG验证)  │    │  (任务调度) │    │  (任务执行) │  │
 │  └─────────────┘    └─────────────┘    └──────┬──────┘    └──────┬──────┘  │
 │                                                │                  │         │
 │                          ┌─────────────────────┼──────────────────┘         │
@@ -43,7 +43,7 @@
 │                          ▼                     ▼                            │
 │                   ┌─────────────┐       ┌─────────────┐                     │
 │                   │  DAG Engine │       │  Checkpoint  │                    │
-│                   │ (Dependency) │       │ (Checkpoint)  │                    │
+│                   │  (依赖解析) │       │  (断点续跑)  │                    │
 │                   └─────────────┘       └─────────────┘                     │
 │                                                                             │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
@@ -66,17 +66,17 @@
 
 ---
 
-## 3. YAML Workflow Definition Language
+## 3. YAML 工作流定义语言
 
-### 3.1 Complete Example
+### 3.1 完整示例
 
 ```yaml
 # workflow.yaml
 name: deploy-application
-description: Automated deployment workflow
+description: 自动化部署工作流
 version: "1.0"
 
-# Global configuration
+# 全局配置
 config:
   timeout: 300s
   retry:
@@ -86,7 +86,7 @@ config:
   checkpoint: /tmp/deploy.state
   max_concurrent: 5
 
-# Input parameters
+# 输入参数
 inputs:
   - name: app_name
     type: string
@@ -100,15 +100,15 @@ inputs:
     required: true
     regex: "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
 
-# Output definitions
+# 输出定义
 outputs:
   deployment_id: ${{steps.deploy.response.body.id}}
   status: ${{steps.health_check.response.body.status}}
 
-# Step definitions
+# 步骤定义
 steps:
   - id: preflight
-    name: Pre-deployment check
+    name: 部署前检查
     type: parallel
     steps:
       - id: check_source
@@ -121,7 +121,7 @@ steps:
         method: GET
 
   - id: deploy
-    name: Execute deployment
+    name: 执行部署
     type: http
     api: https://deploy.example.com/deployments
     method: POST
@@ -131,131 +131,131 @@ steps:
     depends_on: [preflight]
 
   - id: health_check
-    name: Health check
+    name: 健康检查
     type: http
     api: ${{steps.deploy.response.body.url}}/health
     method: GET
     depends_on: [deploy]
 ```
 
-### 3.2 Step Types
+### 3.2 步骤类型
 
-| Type | Description | Example |
+| 类型 | 说明 | 示例 |
 |:---|:---|:---|
-| `http` | HTTP request | API calls |
-| `shell` | Shell command | Script execution |
-| `parallel` | Parallel execution | Independent steps |
-| `condition` | Conditional branch | if/else |
-| `loop` | Loop execution | Array iteration |
-| `workflow` | Sub-workflow | Modularization |
-| `approve` | Manual approval | Safety checkpoint |
+| `http` | HTTP 请求 | API 调用 |
+| `shell` | Shell 命令 | 脚本执行 |
+| `parallel` | 并行执行 | 无依赖步骤 |
+| `condition` | 条件分支 | if/else |
+| `loop` | 循环 | 遍历数组 |
+| `workflow` | 子工作流 | 模块化 |
+| `approve` | 人工审批 | 安全断点 |
 
-### 3.3 Template Expressions and Filters
+### 3.3 模板表达式与过滤器
 
-Template expressions use `${{...}}` syntax and support piped filter chains for data transformation.
+模板表达式使用 `${{...}}` 语法，支持管道过滤器链进行数据转换。
 
-#### 3.3.1 Basic Syntax
+#### 3.3.1 基础语法
 
 ```yaml
-# Simple value access
+# 简单取值
 url: ${{steps.deploy.response.body.url}}
-# Output: https://myapp.example.com
+# 输出: https://myapp.example.com
 
-# Nested access
+# 嵌套访问
 item: ${{steps.fetch.outputs.data.items[0].name}}
-# Output: first-item
+# 输出: first-item
 ```
 
-#### 3.3.2 Filter Chains
+#### 3.3.2 过滤器链
 
-Use `|` pipe to chain filters for data transformation:
+使用 `|` 管道符串联过滤器，支持数据转换：
 
 ```yaml
 body:
-  # Case conversion
+  # 大小写转换
   message: ${{ steps.check.outputs.result | uppercase }}
-  # Output: SUCCESS
+  # 输出: SUCCESS
   
-  # Number formatting
+  # 数值格式化
   duration: ${{ steps.deploy.outputs.duration_ms | format_duration }}
-  # Output: 2m 34s
+  # 输出: 2m 34s
   
-  # Default value
+  # 默认值
   fallback_name: ${{ steps.optional.value | default("unknown") }}
-  # Output when steps.optional.value does not exist: unknown
+  # 当 steps.optional.value 不存在时输出: unknown
   
-  # Array filtering
+  # 数组过滤
   active_users: ${{ steps.fetch_users.outputs.list | filter_by(status=active) }}
   
-  # Array slicing
+  # 数组切片
   top_items: ${{ steps.fetch_list.outputs.data | slice(0,10) }}
   
-  # JSON serialization
+  # JSON 序列化
   payload: ${{ steps.prepare.outputs | to_json }}
   
-  # String truncation
+  # 字符串截断
   preview: ${{ steps.get_content.outputs.body | truncate(100) }}
   
-  # Regex extraction
+  # 正则提取
   version: ${{ steps.get_tag.outputs.ref | regex_extract("^v(.+)$") }}
-  # Output: 1.2.3 (stripped v prefix)
+  # 输出: 1.2.3 (去掉 v 前缀)
 ```
 
-#### 3.3.3 Conditional Expressions
+#### 3.3.3 条件表达式
 
 ```yaml
-# Ternary expression
+# 三元表达式
 env: ${{ inputs.environment || "staging" }}
 
-# Boolean check
+# 布尔判断
 should_deploy: ${{ steps.check.outputs.status == "ready" }}
 
-# Array check
+# 数组判断
 has_items: ${{ length(steps.fetch.outputs.list) > 0 }}
 ```
 
-#### 3.3.4 Built-in Filters
+#### 3.3.4 内置过滤器
 
-| Filter | Description | Example |
+| 过滤器 | 说明 | 示例 |
 |:---|:---|:---|
-| `uppercase` | Convert to uppercase | `HELLO` |
-| `lowercase` | Convert to lowercase | `hello` |
-| `capitalize` | Capitalize first letter | `Hello` |
-| `trim` | Strip leading/trailing whitespace | `hello` |
-| `default(value)` | Default value | fallback |
-| `to_json` | Serialize to JSON | `{"key":"val"}` |
-| `from_json` | Deserialize from JSON | `{key: "val"}` |
-| `length` | Array/string length | `5` |
-| `slice(start, end)` | Array slice | `[0,1,2]` |
-| `filter_by(field=val)` | Array filter | `[{...},...]` |
-| `first` | Get first element | `item` |
-| `last` | Get last element | `item` |
-| `join(sep)` | Join array to string | `"a,b,c"` |
-| `split(sep)` | Split string to array | `["a","b"]` |
-| `replace(old, new)` | String replace | `"hello"` |
-| `regex_extract(pattern)` | Regex extraction | `"match"` |
-| `format_timestamp` | Format timestamp | `"2026-03-23 10:00"` |
-| `format_duration` | Format milliseconds | `"2m 34s"` |
-| `truncate(n)` | Truncate string | `"hel..."` |
-| `base64_encode` | Base64 encode | `"aGVsbG8="` |
-| `base64_decode` | Base64 decode | `"hello"` |
+| `uppercase` | 转大写 | `HELLO` |
+| `lowercase` | 转小写 | `hello` |
+| `capitalize` | 首字母大写 | `Hello` |
+| `trim` | 去除首尾空格 | `hello` |
+| `default(value)` | 默认值 | fallback |
+| `to_json` | 序列化为 JSON | `{"key":"val"}` |
+| `from_json` | JSON 反序列化 | `{key: "val"}` |
+| `length` | 数组/字符串长度 | `5` |
+| `slice(start, end)` | 数组切片 | `[0,1,2]` |
+| `filter_by(field=val)` | 数组过滤 | `[{...},...]` |
+| `first` | 取第一个元素 | `item` |
+| `last` | 取最后一个元素 | `item` |
+| `join(sep)` | 数组拼接字符串 | `"a,b,c"` |
+| `split(sep)` | 字符串分割数组 | `["a","b"]` |
+| `replace(old, new)` | 字符串替换 | `"hello"` |
+| `regex_extract(pattern)` | 正则提取 | `"match"` |
+| `format_timestamp` | 格式化时间戳 | `"2026-03-23 10:00"` |
+| `format_duration` | 格式化毫秒 | `"2m 34s"` |
+| `truncate(n)` | 截断字符串 | `"hel..."` |
+| `base64_encode` | Base64 编码 | `"aGVsbG8="` |
+| `base64_decode` | Base64 解码 | `"hello"` |
 
-#### 3.3.5 Type Safety
+#### 3.3.5 类型安全
 
-The template engine validates type correctness of expressions:
+模板引擎会验证表达式的类型正确性：
 
 ```yaml
-# Type errors detected at validate stage
+# 类型错误会在 validate 阶段检测
 body:
-  count: ${{ steps.fetch.outputs.data | length }}  # OK: returns integer
-  name: ${{ steps.fetch.outputs.data | length }}   # Error: type mismatch warning
+  count: ${{ steps.fetch.outputs.data | length }}  # OK: 返回 integer
+  name: ${{ steps.fetch.outputs.data | length }}   # Error: 类型不匹配警告
 ```
 
 ---
 
-## 4. DAG Scheduling Engine
+## 4. DAG 调度引擎
 
-### 4.1 Dependency Resolution Algorithm
+### 4.1 依赖解析算法
 
 ```rust
 use std::collections::{HashMap, VecDeque};
@@ -271,12 +271,12 @@ impl DagScheduler {
         let mut adjacency: HashMap<StepId, Vec<StepId>> = HashMap::new();
         let mut in_degree: HashMap<StepId, usize> = HashMap::new();
         
-        // Initialize in-degree
+        // 初始化入度
         for step in &steps {
             in_degree.entry(step.id).or_insert(0);
         }
         
-        // Build adjacency list and in-degree table
+        // 构建邻接表和入度表
         for step in &steps {
             for dep in &step.depends_on {
                 adjacency.entry(*dep).or_default().push(step.id);
@@ -284,7 +284,7 @@ impl DagScheduler {
             }
         }
         
-        // Detect cycle dependencies
+        // 检测循环依赖
         if Self::has_cycle(&adjacency, &steps) {
             return Err(CycleError::Detected);
         }
@@ -292,7 +292,7 @@ impl DagScheduler {
         Ok(Self { steps, adjacency, in_degree })
     }
     
-    /// Topological sort, returns execution batches
+    /// 拓扑排序，返回执行批次
     fn topological_sort(&self) -> Result<Vec<Vec<StepId>>, CycleError> {
         let mut in_degree = self.in_degree.clone();
         let mut queue: VecDeque<StepId> = in_degree
@@ -319,7 +319,7 @@ impl DagScheduler {
             batches.push(batch);
         }
         
-        // Verify all steps are processed
+        // 验证所有步骤都被处理
         let total_steps: usize = batches.iter().map(|b| b.len()).sum();
         if total_steps != self.steps.len() {
             return Err(CycleError::Detected);
@@ -366,7 +366,7 @@ impl DagScheduler {
 }
 ```
 
-### 4.2 Execution Scheduler
+### 4.2 执行调度器
 
 ```rust
 struct Scheduler {
@@ -382,10 +382,10 @@ impl Scheduler {
         let batches = self.dag.topological_sort()?;
         
         for (batch_idx, batch) in batches.iter().enumerate() {
-            // Execute current batch (parallel)
+            // 执行当前批次（并行）
             let results = self.execute_batch(batch).await?;
             
-            // Update context
+            // 更新上下文
             let mut context = self.context.write().await;
             for result in &results {
                 context.step_outputs.insert(result.step_id, result.clone());
@@ -415,7 +415,7 @@ impl Scheduler {
                 }
             }
             
-            // Save checkpoint
+            // 保存检查点
             self.checkpoint.save(&context).await?;
         }
         
@@ -447,18 +447,18 @@ impl Scheduler {
 }
 ```
 
-### 4.3 Step-Level Concurrency Control and Rate Limiting
+### 4.3 步骤级并发控制与速率限制
 
-Global `max_concurrent` cannot accommodate varying resource consumption across different steps. Fine-grained step-level control is needed.
+全局 `max_concurrent` 无法满足不同步骤的资源消耗差异。需要步骤级精细控制。
 
-#### 4.3.1 YAML Definition
+#### 4.3.1 YAML 定义
 
 ```yaml
 steps:
   - id: api_calls
     type: parallel
-    max_concurrent: 10      # Step-level concurrency control (overrides global configuration)
-    rate_limit:              # Rate limiting
+    max_concurrent: 10      # 步骤级并发控制（覆盖全局配置）
+    rate_limit:              # 速率限制
       requests_per_second: 5
       burst: 10
     steps:
@@ -468,23 +468,23 @@ steps:
       - id: call_2
         type: http
         api: https://api.example.com/item/2
-      # ... more parallel requests
+      # ... 更多并行请求
 
   - id: heavy_deployment
     type: shell
-    max_concurrent: 1        # Heavyweight operation, limit concurrency
+    max_concurrent: 1        # 重量级操作限制并发
     timeout: 300s
     run: ./deploy.sh
 
   - id: bulk_notifications
     type: parallel
-    max_concurrent: 20       # Lightweight operation, high concurrency
+    max_concurrent: 20       # 轻量级操作高并发
     rate_limit:
       requests_per_second: 100
     steps: [...]
 ```
 
-#### 4.3.2 Rate Limiting Implementation
+#### 4.3.2 速率限制实现
 
 ```rust
 #[derive(Clone, Serialize, Deserialize)]
@@ -545,7 +545,7 @@ impl ConcurrencyLimiter {
 }
 ```
 
-#### 4.3.3 Scheduler Integration
+#### 4.3.3 调度器集成
 
 ```rust
 impl Scheduler {
@@ -559,7 +559,7 @@ impl Scheduler {
         for &step_id in batch {
             let step = self.dag.steps.iter().find(|s| s.id == step_id).unwrap();
             
-            // Get concurrency limiter for this step
+            // 获取该步骤的并发限制器
             let limiter = concurrency_limits.get(&step_id);
             
             let executor = self.executor.clone();
@@ -567,7 +567,7 @@ impl Scheduler {
             let limiter = limiter.cloned();
             
             handles.push(tokio::spawn(async move {
-                // Acquire permit (limit concurrency and rate)
+                // 获取许可（限制并发和速率）
                 let _permit = if let Some(limiter) = limiter {
                     Some(limiter.acquire().await?)
                 } else {
@@ -588,17 +588,17 @@ impl Scheduler {
 }
 ```
 
-#### 4.3.4 Global and Step-Level Configuration Merge
+#### 4.3.4 全局与步骤级配置合并
 
 ```rust
 struct WorkflowConfig {
-    // Global configuration (defaults)
-    max_concurrent: usize,          // Global concurrency limit
-    rate_limit: Option<RateLimitConfig>,  // Global rate limit
+    // 全局配置（默认值）
+    max_concurrent: usize,          // 全局并发限制
+    rate_limit: Option<RateLimitConfig>,  // 全局速率限制
 }
 
 struct StepConfig {
-    // Step-level configuration (overrides global)
+    // 步骤级配置（覆盖全局）
     max_concurrent: Option<usize>,
     rate_limit: Option<RateLimitConfig>,
 }
@@ -617,9 +617,9 @@ impl StepConfig {
 
 ---
 
-## 5. Step Executors
+## 5. 步骤执行器
 
-### 5.1 HTTP Executor
+### 5.1 HTTP 执行器
 
 ```rust
 struct HttpExecutor {
@@ -630,18 +630,18 @@ struct HttpExecutor {
 
 impl HttpExecutor {
     async fn execute(&self, step: &HttpStep, context: &ExecutionContext) -> StepResult {
-        // 1. Resolve template expressions
+        // 1. 解析模板表达式
         let url = self.resolve_template(&step.api, context)?;
         let headers = self.resolve_headers(&step.headers, context)?;
         let body = self.resolve_body(&step.body, context)?;
         
-        // 2. Check cache
+        // 2. 检查缓存
         let cache_key = self.generate_cache_key(&url, &step.method, &body);
         if let Some(cached) = self.cache_layer.get(&cache_key).await {
             return StepResult::from_cache(cached);
         }
         
-        // 3. Build request
+        // 3. 构建请求
         let mut request = self.client.request(step.method.parse()?, &url);
         for (key, value) in headers {
             request = request.header(key, value);
@@ -650,22 +650,22 @@ impl HttpExecutor {
             request = request.json(&body);
         }
         
-        // 4. Execute request (with retry)
+        // 4. 执行请求（带重试）
         let response = self.retry_engine.execute(|| {
             request.try_clone().unwrap().send()
         }).await?;
         
-        // 5. Parse response
+        // 5. 解析响应
         let status_code = response.status().as_u16();
         let response_headers = response.headers().clone();
         let response_body: serde_json::Value = response.json().await?;
         
-        // 6. Validate expected results
+        // 6. 验证期望结果
         if let Some(expect) = &step.expect {
             self.validate_expect(expect, status_code, &response_body)?;
         }
         
-        // 7. Cache response
+        // 7. 缓存响应
         if let Some(cache_config) = &step.cache {
             self.cache_layer.set(&cache_key, &response_body, cache_config.ttl).await?;
         }
@@ -680,7 +680,7 @@ impl HttpExecutor {
     fn resolve_template(&self, template: &str, context: &ExecutionContext) -> Result<String, TemplateError> {
         let mut result = template.to_string();
         
-        // Parse ${{...}} expressions
+        // 解析 ${{...}} 表达式
         let re = Regex::new(r"\$\{\{([^}]+)\}\}")?;
         for cap in re.captures_iter(template) {
             let expr = &cap[1];
@@ -693,7 +693,7 @@ impl HttpExecutor {
 }
 ```
 
-### 5.2 Shell Executor
+### 5.2 Shell 执行器
 
 ```rust
 struct ShellExecutor {
@@ -703,16 +703,16 @@ struct ShellExecutor {
 
 impl ShellExecutor {
     async fn execute(&self, step: &ShellStep, context: &ExecutionContext) -> StepResult {
-        // 1. Resolve templates in command
+        // 1. 解析命令中的模板
         let command = self.resolve_template(&step.run, context)?;
         
-        // 2. Prepare environment variables
+        // 2. 准备环境变量
         let mut envs = self.env_vars.clone();
         for (key, value) in &step.env {
             envs.insert(key.clone(), self.resolve_template(value, context)?);
         }
         
-        // 3. Execute command
+        // 3. 执行命令
         let output = tokio::process::Command::new("bash")
             .arg("-c")
             .arg(&command)
@@ -727,7 +727,7 @@ impl ShellExecutor {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         let exit_code = output.status.code().unwrap_or(-1);
         
-        // 4. Validate expected results
+        // 4. 验证期望结果
         if let Some(expect) = &step.expect {
             self.validate_expect(expect, exit_code, &stdout)?;
         }
@@ -741,16 +741,16 @@ impl ShellExecutor {
 }
 ```
 
-#### 5.2.1 Shell Safety Mode
+#### 5.2.1 Shell 安全模式
 
-Prevent dangerous command execution, protecting production environments.
+防止危险命令执行，保护生产环境。
 
 ```yaml
 steps:
   - id: cleanup
     type: shell
-    safe_mode: strict        # Enable safety mode
-    allowed_commands:        # Whitelist mode
+    safe_mode: strict        # 启用安全模式
+    allowed_commands:        # 白名单模式
       - "ls"
       - "cat"
       - "echo"
@@ -759,30 +759,30 @@ steps:
 
   - id: risky_cleanup
     type: shell
-    safe_mode: warn          # Warning only, no blocking
+    safe_mode: warn          # 仅警告，不阻止
     run: rm -rf /tmp/cache/*
     
   - id: full_trust
     type: shell
-    safe_mode: none          # Disable safety mode
+    safe_mode: none          # 禁用安全模式
     run: sudo systemctl restart nginx
 ```
 
-**Safety Mode Levels:**
+**安全模式级别：**
 
-| Level | Description | Behavior |
+| 级别 | 说明 | 行为 |
 |:---|:---|:---|
-| `strict` | Strict mode | Blocks dangerous commands, checks before execution |
-| `warn` | Warning mode | Allows execution, outputs warning logs |
-| `none` | Unrestricted | No safety checks |
+| `strict` | 严格模式 | 禁止危险命令，执行前检查 |
+| `warn` | 警告模式 | 允许执行，输出警告日志 |
+| `none` | 无限制 | 不进行安全检查 |
 
-**Default blocked patterns (strict mode):**
+**默认禁止的危险模式（strict 模式）：**
 
 ```rust
 struct ShellSafetyChecker {
-    // Dangerous pattern blacklist
+    // 危险模式黑名单
     blocked_patterns: Vec<Regex>,
-    // Environment protection
+    // 环境保护
     protected_paths: Vec<PathBuf>,
 }
 
@@ -790,14 +790,14 @@ impl ShellSafetyChecker {
     fn default() -> Self {
         Self {
             blocked_patterns: vec![
-                Regex::new(r"rm\s+-rf\s+[/~]").unwrap(),        // rm -rf / or rm -rf ~
+                Regex::new(r"rm\s+-rf\s+[/~]").unwrap(),        // rm -rf / 或 rm -rf ~
                 Regex::new(r"rm\s+-rf\s+\*").unwrap(),          // rm -rf *
                 Regex::new(r":\(\)\{.*:\|.*&\s*;\s*:\}").unwrap(), // fork bomb
-                Regex::new(r"dd\s+if=/dev/").unwrap(),           // dd to device
-                Regex::new(r"mkfs\.").unwrap(),                  // Format disk
-                Regex::new(r"chmod\s+777").unwrap(),             // Excessive permissions
-                Regex::new(r">\s+/dev/sd").unwrap(),             // Write to disk device
-                Regex::new(r"curl.*\|\s*(ba)?sh").unwrap(),      // Pipe to shell
+                Regex::new(r"dd\s+if=/dev/").unwrap(),           // dd 到设备
+                Regex::new(r"mkfs\.").unwrap(),                  // 格式化磁盘
+                Regex::new(r"chmod\s+777").unwrap(),             // 过度授权
+                Regex::new(r">\s+/dev/sd").unwrap(),             // 写入磁盘设备
+                Regex::new(r"curl.*\|\s*(ba)?sh").unwrap(),      // 管道到 shell
             ],
             protected_paths: vec![
                 PathBuf::from("/"),
@@ -810,7 +810,7 @@ impl ShellSafetyChecker {
     }
     
     fn check_command(&self, command: &str) -> Result<(), SafetyViolation> {
-        // Check dangerous patterns
+        // 检查危险模式
         for pattern in &self.blocked_patterns {
             if pattern.is_match(command) {
                 return Err(SafetyViolation::BlockedPattern {
@@ -820,7 +820,7 @@ impl ShellSafetyChecker {
             }
         }
         
-        // Check if working directory is in protected paths
+        // 检查工作目录是否在受保护路径
         // ...
         
         Ok(())
@@ -828,7 +828,7 @@ impl ShellSafetyChecker {
 }
 ```
 
-### 5.3 Loop Executor
+### 5.3 循环执行器
 
 ```rust
 struct LoopExecutor {
@@ -841,7 +841,7 @@ impl LoopExecutor {
         
         match &step.loop_type {
             LoopType::ForEach { over, as_name } => {
-                // Iterate array
+                // 遍历数组
                 let items: Vec<serde_json::Value> = context.evaluate(over)?;
                 
                 for (idx, item) in items.iter().enumerate() {
@@ -857,7 +857,7 @@ impl LoopExecutor {
             }
             
             LoopType::While { condition, max_iterations } => {
-                // Conditional loop
+                // 条件循环
                 let mut iteration = 0;
                 
                 while context.evaluate(condition)? && iteration < *max_iterations {
@@ -870,7 +870,7 @@ impl LoopExecutor {
             }
             
             LoopType::Range { start, end } => {
-                // Range loop
+                // 范围循环
                 for idx in *start..*end {
                     let mut loop_context = context.clone();
                     loop_context.set_variable("index", idx.into());
@@ -888,7 +888,7 @@ impl LoopExecutor {
 }
 ```
 
-### 5.4 Condition Executor
+### 5.4 条件执行器
 
 ```rust
 struct ConditionExecutor {
@@ -901,7 +901,7 @@ impl ConditionExecutor {
         let condition_result: bool = context.evaluate(&step.expression)?;
         
         if condition_result {
-            // Execute then branch
+            // 执行 then 分支
             let mut results = vec![];
             for inner_step in &step.then_steps {
                 let result = self.then_executor.execute(inner_step, context).await?;
@@ -909,7 +909,7 @@ impl ConditionExecutor {
             }
             StepResult::success(BranchResponse { branch: "then", results })
         } else {
-            // Execute else branch
+            // 执行 else 分支
             if let Some(else_steps) = &step.else_steps {
                 let mut results = vec![];
                 for inner_step in else_steps {
@@ -925,38 +925,38 @@ impl ConditionExecutor {
 }
 ```
 
-### 5.5 Manual Approval Executor (Human-in-the-Loop)
+### 5.5 人工审批执行器 (Human-in-the-Loop)
 
-When Agents execute critical operations (deploying to production, deleting data, sending emails), human approval checkpoints are needed.
+Agent 执行关键操作（部署生产、删除数据、发送邮件）时，需要人类审批断点。
 
-#### 5.5.1 YAML Definition
+#### 5.5.1 YAML 定义
 
 ```yaml
 steps:
   - id: approve_production_deploy
     type: approve
-    name: Production Deployment Approval
+    name: 生产环境部署审批
     message: |
-      Preparing to deploy ${{inputs.version}} to production.
+      准备将 ${{inputs.version}} 部署到生产环境。
       
-      Deployment info:
-      - Application: ${{inputs.app_name}}
-      - Version: ${{inputs.version}}
-      - Environment: production
+      部署信息：
+      - 应用: ${{inputs.app_name}}
+      - 版本: ${{inputs.version}}
+      - 环境: production
       
-      Confirm to continue?
+      确认继续？
     approvers:
       - team-leads@company.com
       - ops@company.com
-    timeout: 3600s          # Approval timeout
-    on_timeout: abort       # Timeout strategy: abort | pause | continue
-    require_comment: true   # Whether to require approval comments
-    auto_approve_on:        # Auto-approval conditions
+    timeout: 3600s          # 审批超时
+    on_timeout: abort       # 超时策略: abort | pause | continue
+    require_comment: true   # 是否要求审批意见
+    auto_approve_on:        # 自动审批条件
       - condition: "${{inputs.environment == 'staging'}}"
-        reason: "Staging environment auto-approved"
+        reason: "staging 环境自动通过"
 ```
 
-#### 5.5.2 Approval Status
+#### 5.5.2 审批状态
 
 ```rust
 struct ApproveExecutor {
@@ -965,11 +965,11 @@ struct ApproveExecutor {
 }
 
 enum ApprovalStatus {
-    Pending,      // Pending
-    Approved,     // Approved
-    Rejected,     // Rejected
-    TimedOut,     // Timed out
-    AutoApproved, // Auto-approved
+    Pending,      // 等待审批
+    Approved,     // 已批准
+    Rejected,     // 已拒绝
+    TimedOut,     // 超时
+    AutoApproved, // 自动批准
 }
 
 struct ApprovalRecord {
@@ -986,7 +986,7 @@ struct ApprovalRecord {
 
 impl ApproveExecutor {
     async fn execute(&self, step: &ApproveStep, context: &ExecutionContext) -> StepResult {
-        // 1. Check auto-approval conditions
+        // 1. 检查自动审批条件
         for auto_rule in &step.auto_approve_on {
             if context.evaluate(&auto_rule.condition)? {
                 return StepResult::success(ApprovalResponse {
@@ -997,7 +997,7 @@ impl ApproveExecutor {
             }
         }
         
-        // 2. Send approval notification
+        // 2. 发送审批通知
         let approval = ApprovalRecord {
             step_id: step.id.clone(),
             workflow_execution_id: context.execution_id.clone(),
@@ -1013,7 +1013,7 @@ impl ApproveExecutor {
         self.storage.save(&approval).await?;
         self.notification_service.send_approval_request(&approval).await?;
         
-        // 3. Wait for approval or timeout
+        // 3. 等待审批或超时
         let result = self.wait_for_approval(&step.id, step.timeout).await?;
         
         StepResult::success(result)
@@ -1047,7 +1047,7 @@ impl ApproveExecutor {
                 return Ok(ApprovalResponse {
                     status: ApprovalStatus::TimedOut,
                     approved_by: "timeout".to_string(),
-                    comment: Some("Approval timeout".to_string()),
+                    comment: Some("审批超时".to_string()),
                 });
             }
             
@@ -1057,47 +1057,47 @@ impl ApproveExecutor {
 }
 ```
 
-#### 5.5.3 Approval Query API
+#### 5.5.3 审批查询 API
 
 ```bash
-# View pending approvals
+# 查看待审批项
 flow-run approve list --pending
 
-# Approve
-flow-run approve approve step_id --comment "Confirmed"
+# 批准
+flow-run approve approve step_id --comment "已确认"
 
-# Reject
-flow-run approve reject step_id --reason "Risk not assessed"
+# 拒绝
+flow-run approve reject step_id --reason "风险未评估"
 
-# View approval details
+# 查看审批详情
 flow-run approve show step_id
 ```
 
-### 5.6 Sub-Workflow Executor and Error Propagation
+### 5.6 子工作流执行器与错误传播
 
-#### 5.6.1 YAML Definition
+#### 5.6.1 YAML 定义
 
 ```yaml
 steps:
   - id: run_cleanup
     type: workflow
-    name: Execute cleanup sub-workflow
+    name: 执行清理子工作流
     workflow: cleanup.yaml
     inputs:
       target: ${{inputs.environment}}
       dry_run: ${{inputs.dry_run}}
-    error_strategy: continue  # Key configuration
+    error_strategy: continue  # 关键配置
     timeout: 120s
 ```
 
-#### 5.6.2 Error Strategy
+#### 5.6.2 错误策略
 
 ```rust
 enum SubWorkflowErrorStrategy {
-    Propagate,   // Propagate upward, parent workflow fails (default)
-    Continue,    // Sub-workflow failed, parent workflow continues
-    Retry,       // Sub-workflow failed, retry sub-workflow
-    Ignore,      // Ignore error, mark as skipped
+    Propagate,   // 向上传播，父工作流失败（默认）
+    Continue,    // 子工作流失败，父工作流继续
+    Retry,       // 子工作流失败，重试子工作流
+    Ignore,      // 忽略错误，标记为 skipped
 }
 
 struct WorkflowExecutor {
@@ -1106,19 +1106,19 @@ struct WorkflowExecutor {
 
 impl WorkflowExecutor {
     async fn execute(&self, step: &WorkflowStep, context: &ExecutionContext) -> StepResult {
-        // 1. Resolve sub-workflow path
+        // 1. 解析子工作流路径
         let workflow_path = self.resolve_workflow_path(&step.workflow)?;
         
-        // 2. Prepare sub-workflow input
+        // 2. 准备子工作流输入
         let mut inputs = step.inputs.clone();
         for (key, value) in inputs.iter_mut() {
             *value = self.resolve_template(value, context)?;
         }
         
-        // 3. Execute sub-workflow
+        // 3. 执行子工作流
         let result = self.runner.run_with_inputs(&workflow_path, inputs).await;
         
-        // 4. Handle result based on error strategy
+        // 4. 根据错误策略处理结果
         match result {
             Ok(output) => StepResult::success(WorkflowResponse {
                 outputs: output.outputs,
@@ -1129,14 +1129,14 @@ impl WorkflowExecutor {
                     StepResult::failed(err)
                 }
                 SubWorkflowErrorStrategy::Continue => {
-                    StepResult::failed_with_warning(err, "Sub-workflow failed, continue execution")
+                    StepResult::failed_with_warning(err, "子工作流失败，继续执行")
                 }
                 SubWorkflowErrorStrategy::Retry => {
-                    // Retry logic handled by outer RetryEngine
+                    // 重试逻辑由外层 RetryEngine 处理
                     StepResult::failed(err)
                 }
                 SubWorkflowErrorStrategy::Ignore => {
-                    StepResult::skipped(format!("Sub-workflow failed: {}", err))
+                    StepResult::skipped(format!("子工作流失败: {}", err))
                 }
             }
         }
@@ -1144,21 +1144,21 @@ impl WorkflowExecutor {
 }
 ```
 
-#### 5.6.3 Context Isolation
+#### 5.6.3 上下文隔离
 
 ```yaml
-# Sub-workflow isolates context by default
+# 子工作流默认隔离上下文
 steps:
   - id: isolated_workflow
     type: workflow
     workflow: cleanup.yaml
-    isolation: true  # Default true, does not share parent workflow variables
+    isolation: true  # 默认 true，不共享父工作流变量
     
   - id: shared_workflow
     type: workflow
     workflow: deploy.yaml
-    isolation: false  # Shares parent workflow variables
-    passthrough_vars:  # Or pass through specific variables only
+    isolation: false  # 共享父工作流变量
+    passthrough_vars:  # 或只传递特定变量
       - deployment_id
       - environment
 ```
@@ -1166,9 +1166,9 @@ steps:
 
 ---
 
-## 6. Checkpoints and Resume from Breakpoint
+## 6. 检查点与断点续跑
 
-### 6.1 Checkpoint Data Structure
+### 6.1 检查点数据结构
 
 ```rust
 #[derive(Serialize, Deserialize)]
@@ -1180,15 +1180,15 @@ struct Checkpoint {
     checkpoint_at: DateTime<Utc>,
     status: CheckpointStatus,
     
-    // Execution state
+    // 执行状态
     completed_steps: HashSet<StepId>,
     failed_steps: HashSet<StepId>,
     current_batch: usize,
     
-    // Step outputs (for context recovery)
+    // 步骤输出（用于恢复上下文）
     step_outputs: HashMap<StepId, StepResult>,
     
-    // Global variables
+    // 全局变量
     variables: HashMap<String, serde_json::Value>,
 }
 
@@ -1199,7 +1199,7 @@ enum CheckpointStatus {
 }
 ```
 
-### 6.2 Checkpoint Manager
+### 6.2 检查点管理器
 
 ```rust
 struct CheckpointManager {
@@ -1273,15 +1273,15 @@ impl CheckpointManager {
 }
 ```
 
-### 6.3 Resume from Breakpoint Flow
+### 6.3 断点续跑流程
 
 ```rust
 impl Scheduler {
     async fn resume(&mut self, checkpoint_id: &str) -> Result<WorkflowResult, WorkflowError> {
-        // 1. Load checkpoint
+        // 1. 加载检查点
         let checkpoint = CheckpointManager::load(checkpoint_id, &self.checkpoint.base_dir).await?;
         
-        // 2. Restore execution context
+        // 2. 恢复执行上下文
         let mut context = self.context.write().await;
         context.completed_steps = checkpoint.completed_steps;
         context.failed_steps = checkpoint.failed_steps;
@@ -1289,11 +1289,11 @@ impl Scheduler {
         context.variables = checkpoint.variables;
         context.current_batch = checkpoint.current_batch;
         
-        // 3. Get remaining batches
+        // 3. 获取剩余批次
         let all_batches = self.dag.topological_sort()?;
         let remaining_batches = &all_batches[checkpoint.current_batch..];
         
-        // 4. Continue execution
+        // 4. 继续执行
         for (idx, batch) in remaining_batches.iter().enumerate() {
             context.current_batch = checkpoint.current_batch + idx;
             
@@ -1337,26 +1337,26 @@ impl Scheduler {
 }
 ```
 
-### 6.4 Timeout Chain Design
+### 6.4 超时链设计
 
-Current design issue: A workflow with a 300s timeout pauses at the 280s mark. After resuming, only 20s remains, but the current design restarts the timer from scratch.
+当前设计的问题：一个 300s 超时的工作流，执行到第 280s 时暂停，恢复后只有 20s 剩余，但当前设计会重新开始计时。
 
-#### 6.4.1 Timeout Context Persistence
+#### 6.4.1 超时上下文保存
 
 ```rust
 struct Checkpoint {
-    // ... existing fields ...
+    // ... 原有字段 ...
     
-    // Timeout context
+    // 超时上下文
     timeout_config: TimeoutContext,
 }
 
 #[derive(Serialize, Deserialize)]
 struct TimeoutContext {
-    original_timeout: Duration,     // Original timeout configuration
-    elapsed_time: Duration,         // Elapsed time
-    remaining_timeout: Duration,    // Remaining timeout
-    step_timeouts: HashMap<StepId, StepTimeoutInfo>,  // Step-level timeout tracking
+    original_timeout: Duration,     // 原始超时配置
+    elapsed_time: Duration,         // 已消耗时间
+    remaining_timeout: Duration,    // 剩余超时时间
+    step_timeouts: HashMap<StepId, StepTimeoutInfo>,  // 步骤级超时追踪
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1367,14 +1367,14 @@ struct StepTimeoutInfo {
 }
 ```
 
-#### 6.4.2 Timeout Calculation and Inheritance
+#### 6.4.2 超时计算与继承
 
 ```rust
 impl Scheduler {
     async fn resume(&mut self, checkpoint_id: &str) -> Result<WorkflowResult, WorkflowError> {
         let checkpoint = CheckpointManager::load(checkpoint_id, &self.checkpoint.base_dir).await?;
         
-        // Check if remaining timeout is sufficient
+        // 检查剩余超时是否充足
         if checkpoint.timeout_config.remaining_timeout.is_zero() {
             return Err(WorkflowError::TimeoutExpired {
                 checkpoint_id: checkpoint_id.to_string(),
@@ -1382,21 +1382,21 @@ impl Scheduler {
             });
         }
         
-        // Restore timeout context
+        // 恢复超时上下文
         let mut context = self.context.write().await;
         context.timeout_remaining = checkpoint.timeout_config.remaining_timeout;
         context.started_at = checkpoint.started_at;
         
-        // Calculate new deadline
+        // 计算新的 deadline
         let new_deadline = Instant::now() + checkpoint.timeout_config.remaining_timeout;
         context.deadline = Some(new_deadline);
         
-        // ... continue execution ...
+        // ... 继续执行 ...
     }
 }
 ```
 
-#### 6.4.3 Timeout Decrement
+#### 6.4.3 超时递减
 
 ```rust
 impl Executor {
@@ -1405,15 +1405,15 @@ impl Executor {
         step: &Step,
         context: &ExecutionContext,
     ) -> Result<StepResult, WorkflowError> {
-        // Get step remaining timeout
+        // 获取步骤剩余超时
         let step_timeout = context.get_step_timeout(&step.id);
         
-        // Check workflow-level remaining timeout
+        // 检查工作流级别剩余超时
         let workflow_remaining = context.deadline
             .map(|d| d.saturating_duration_since(Instant::now()))
             .unwrap_or(Duration::MAX);
         
-        // Take the smaller value
+        // 取较小值
         let effective_timeout = step_timeout.min(workflow_remaining);
         
         if effective_timeout.is_zero() {
@@ -1422,30 +1422,30 @@ impl Executor {
             });
         }
         
-        // Execute step with effective timeout
+        // 执行步骤，传入有效超时
         tokio::time::timeout(effective_timeout, self.execute(step, context)).await?
     }
 }
 ```
 
-#### 6.4.4 Timeout Renewal Configuration
+#### 6.4.4 超时续期配置
 
 ```yaml
 config:
-  timeout: 600s           # Workflow total timeout
-  timeout_strategy: hard  # hard: strict timeout | soft: renewable
+  timeout: 600s           # 工作流总超时
+  timeout_strategy: hard  # hard: 严格超时 | soft: 可续期
   
-  # Behavior after checkpoint resume
+  # 检查点恢复后的行为
   resume:
-    timeout_mode: inherit    # inherit: inherit remaining timeout | reset: restart timer
-    grace_period: 30s        # Grace period after resume
+    timeout_mode: inherit    # inherit: 继承剩余超时 | reset: 重新计时
+    grace_period: 30s        # 恢复后的宽限期
 ```
 
 ---
 
-## 7. Error Handling and Retry
+## 7. 错误处理与重试
 
-### 7.1 Retry Strategy
+### 7.1 重试策略
 
 ```rust
 #[derive(Clone, Serialize, Deserialize)]
@@ -1518,7 +1518,7 @@ impl RetryPolicy {
 }
 ```
 
-### 7.2 Retry Engine
+### 7.2 重试引擎
 
 ```rust
 struct RetryEngine {
@@ -1571,54 +1571,54 @@ impl RetryEngine {
 
 ---
 
-## 8. CLI Interface and JSON Output
+## 8. CLI 接口与 JSON 输出
 
-### 8.1 CLI Command Structure
+### 8.1 CLI 命令结构
 
 ```
 flow-run
-├── run         # Execute workflow
-├── resume      # Resume from checkpoint
-├── validate    # Validate workflow definition
-├── dry-run     # Simulate execution
+├── run         # 执行工作流
+├── resume      # 从检查点恢复
+├── validate    # 验证工作流定义
+├── dry-run     # 模拟执行
 ├── checkpoint
-│   ├── list    # List checkpoints
-│   ├── show    # Show checkpoint details
-│   └── clean   # Clean up expired checkpoints
-├── history     # View execution history
-└── schema      # Output JSON Schema
+│   ├── list    # 列出检查点
+│   ├── show    # 查看检查点详情
+│   └── clean   # 清理过期检查点
+├── history     # 查看执行历史
+└── schema      # 输出 JSON Schema
 ```
 
-### 8.2 Command Examples
+### 8.2 命令示例
 
 ```bash
-# Execute workflow
+# 执行工作流
 flow-run deploy.yaml
 flow-run deploy.yaml --input app_name=myapp --input version=v1.2.3
 flow-run deploy.yaml --input environment=production --json
 
-# Simulate execution
+# 模拟执行
 flow-run deploy.yaml --dry-run
 
-# Resume from checkpoint
+# 从检查点恢复
 flow-run resume cp_abc123
 flow-run resume cp_abc123 --from-step deploy
 
-# Validate workflow
+# 验证工作流
 flow-run validate deploy.yaml
 flow-run validate deploy.yaml --strict
 
-# Checkpoint management
+# 检查点管理
 flow-run checkpoint list
 flow-run checkpoint show cp_abc123
 flow-run checkpoint clean --older-than 7d
 
-# View execution history
+# 查看执行历史
 flow-run history --last 10
 flow-run history --workflow deploy.yaml
 ```
 
-### 8.3 JSON Output Schema
+### 8.3 JSON 输出 Schema
 
 ```json
 {
@@ -1708,7 +1708,7 @@ flow-run history --workflow deploy.yaml
 }
 ```
 
-### 8.4 Output Example
+### 8.4 输出示例
 
 ```json
 {
@@ -1728,7 +1728,7 @@ flow-run history --workflow deploy.yaml
   "steps": [
     {
       "id": "preflight",
-      "name": "Pre-deployment Check",
+      "name": "部署前检查",
       "type": "parallel",
       "status": "success",
       "started_at": "2026-03-22T10:00:00Z",
@@ -1744,7 +1744,7 @@ flow-run history --workflow deploy.yaml
     },
     {
       "id": "deploy",
-      "name": "Execute Deployment",
+      "name": "执行部署",
       "type": "http",
       "status": "success",
       "request": {
@@ -1773,63 +1773,63 @@ flow-run history --workflow deploy.yaml
 }
 ```
 
-### 8.5 Output Filters (Agent Optimization)
+### 8.5 输出过滤器（Agent 优化）
 
-Agents need specific output fragments to reduce token consumption.
+Agent 消费输出时需要特定片段，减少 token 消耗。
 
 ```bash
-# Extract only the outputs section
+# 只提取 outputs 部分
 flow-run deploy.yaml --extract outputs
 
-# Extract specific path
+# 提取特定路径
 flow-run deploy.yaml --extract outputs.deployment_id
 flow-run deploy.yaml --extract outputs.deployment_id,metrics.total_duration_ms
 
-# Use jq expression
+# 使用 jq 表达式
 flow-run deploy.yaml --jq '.outputs | {id: .deployment_id, url: .url}'
 
-# Concise mode (values only, no keys)
+# 简洁模式（仅输出值，无 key）
 flow-run deploy.yaml --raw outputs.deployment_id
-# Output: deploy_abc123
+# 输出: deploy_abc123
 
-# Table format (human-readable)
+# 表格格式（人类可读）
 flow-run deploy.yaml --format table
 
-# Minimal mode (status and key outputs only)
+# 最小模式（仅状态和关键输出）
 flow-run deploy.yaml --minimal
-# Output:
+# 输出:
 # status: success
 # outputs:
 #   deployment_id: deploy_abc123
 #   url: https://myapp.example.com
 ```
 
-### 8.6 Dry-run DAG Visualization
+### 8.6 Dry-run DAG 可视化
 
 ```bash
-# Validate and show DAG
+# 验证并显示 DAG
 flow-run validate deploy.yaml --show-dag
 
-# Output Mermaid format (renderable as image)
+# 输出 Mermaid 格式（可渲染为图片）
 flow-run validate deploy.yaml --dag-format mermaid
 ```
 
-**Output Example:**
+**输出示例：**
 
 ```mermaid
 graph TD
-    preflight[Pre-deployment Check] --> deploy[Execute Deployment]
-    deploy --> health_check[Health Check]
+    preflight[部署前检查] --> deploy[执行部署]
+    deploy --> health_check[健康检查]
     
-    subgraph parallel[Parallel Group]
-        check_source[Check Source]
-        check_target[Check Target]
+    subgraph parallel[并行组]
+        check_source[检查源]
+        check_target[检查目标]
     end
     
     preflight --- parallel
 ```
 
-**ASCII Format:**
+**ASCII 格式：**
 
 ```
 workflow: deploy-application
@@ -1850,7 +1850,7 @@ timeout: 300s
                        │health_check │
                        └─────────────┘
                        
-Steps: 4 | Dependency edges: 3 | Max concurrency: 2
+步骤数: 4 | 依赖边: 3 | 最大并发: 2
 ```
 
 ---
@@ -1881,14 +1881,14 @@ impl OpenCliExecutor {
 
 ---
 
-## 9. Hooks and Events Mechanism
+## 9. 钩子与事件机制 (Hooks & Events)
 
-Trigger side effects before/after step execution, supporting notifications, cleanup, rollback, etc.
+步骤执行前后的副作用触发，支持通知、清理、回滚等场景。
 
-### 9.1 YAML Definition
+### 9.1 YAML 定义
 
 ```yaml
-# Global hooks
+# 全局钩子
 on:
   workflow_start:
     - run: echo "Workflow started at $(date)"
@@ -1910,7 +1910,7 @@ on:
           error: ${{error.message}}
     - run: ./scripts/rollback.sh --checkpoint ${{checkpoint.id}}
 
-# Step-level hooks
+# 步骤级钩子
 steps:
   - id: deploy
     type: http
@@ -1929,21 +1929,21 @@ steps:
         - run: notify_slack --msg "✅ Deployment successful"
 ```
 
-### 9.2 Hook Event Types
+### 9.2 钩子事件类型
 
-| Event | Trigger Timing | Context Variables |
+| 事件 | 触发时机 | 上下文变量 |
 |:---|:---|:---|
-| `workflow_start` | When workflow starts | `workflow.*` |
-| `workflow_success` | When workflow completes successfully | `workflow.*`, `outputs.*` |
-| `workflow_failure` | When workflow fails | `workflow.*`, `error.*` |
-| `workflow_pause` | When workflow pauses | `workflow.*`, `checkpoint.*` |
-| `workflow_resume` | When workflow resumes | `workflow.*`, `checkpoint.*` |
-| `step_start` | Before step execution | `step.*` |
-| `step_success` | When step succeeds | `step.*`, `step.result` |
-| `step_failure` | When step fails | `step.*`, `error.*` |
-| `step_retry` | When step retries | `step.*`, `retry.attempt` |
+| `workflow_start` | 工作流开始时 | `workflow.*` |
+| `workflow_success` | 工作流成功完成时 | `workflow.*`, `outputs.*` |
+| `workflow_failure` | 工作流失败时 | `workflow.*`, `error.*` |
+| `workflow_pause` | 工作流暂停时 | `workflow.*`, `checkpoint.*` |
+| `workflow_resume` | 工作流恢复时 | `workflow.*`, `checkpoint.*` |
+| `step_start` | 步骤开始执行前 | `step.*` |
+| `step_success` | 步骤成功时 | `step.*`, `step.result` |
+| `step_failure` | 步骤失败时 | `step.*`, `error.*` |
+| `step_retry` | 步骤重试时 | `step.*`, `retry.attempt` |
 
-### 9.3 Hook Executor Implementation
+### 9.3 钩子执行器实现
 
 ```rust
 #[derive(Clone, Serialize, Deserialize)]
@@ -1981,7 +1981,7 @@ impl HookExecutor {
         for action in hooks {
             let result = match action {
                 HookAction::Run { command } => {
-                    // Hook execution failure does not affect main flow (default)
+                    // 钩子执行失败不影响主流程（默认）
                     match self.shell_executor.execute_command(command, context).await {
                         Ok(r) => HookResult::Success(r),
                         Err(e) => HookResult::Failed(e.to_string()),
@@ -2002,89 +2002,89 @@ impl HookExecutor {
 }
 ```
 
-### 9.4 Hook Configuration Options
+### 9.4 钩子配置选项
 
 ```yaml
 config:
   hooks:
-    continue_on_error: true    # Whether to continue when hook execution fails (default true)
-    timeout: 30s               # Single hook timeout
-    parallel: false            # Whether to execute hook list in parallel
-    retry_on_failure: false    # Whether to retry on hook failure
+    continue_on_error: true    # 钩子执行失败时是否继续（默认 true）
+    timeout: 30s               # 单个钩子超时
+    parallel: false            # 是否并行执行钩子列表
+    retry_on_failure: false    # 钩子失败是否重试
 ```
 
 
 ---
 
-## 10. Technology Stack Selection
+## 10. 技术栈选型
 
-| Component | Technology | Rationale |
+| 组件 | 技术选型 | 理由 |
 |:---|:---|:---|
-| Language | Rust | Performance, safety, cross-platform, single binary |
-| CLI Framework | `clap` | Mature, type-safe, auto-generated help |
-| YAML Parsing | `serde_yml` | Good serde integration |
-| JSON Processing | `serde_json` | Standard-level support |
-| Async Runtime | `tokio` | Mature ecosystem, excellent performance |
-| HTTP Client | `reqwest` | Async, connection pooling, proxy support |
-| Template Engine | `tera` or custom | Complex expression support |
-| DAG Algorithm | Custom | Optimized for workflows |
-| Checkpoint Storage | File system (JSON) | Simple, readable, version-controllable |
-| Logging | `tracing` | Structured logging, span support |
-| UUID | `uuid` | Generate unique IDs |
-| Regex | `regex` | Template parsing |
-| Rate Limiting | `governor` | High-performance token bucket algorithm |
-| Notification | SMTP / Webhook | Approval notifications, alerts |
-| Lock Service | File lock / Redis | Distributed deployment scenarios |
+| 语言 | Rust | 性能、安全、跨平台、单二进制 |
+| CLI 框架 | `clap` | 成熟、类型安全、自动生成帮助 |
+| YAML 解析 | `serde_yml` | 与 serde 集成良好 |
+| JSON 处理 | `serde_json` | 标准库级别支持 |
+| 异步运行时 | `tokio` | 生态成熟、性能优异 |
+| HTTP 客户端 | `reqwest` | 异步、连接池、代理支持 |
+| 模板引擎 | `tera` 或自研 | 支持复杂表达式 |
+| DAG 算法 | 自研 | 针对工作流优化 |
+| 检查点存储 | 文件系统 (JSON) | 简单、可读、可版本控制 |
+| 日志 | `tracing` | 结构化日志、span 支持 |
+| UUID | `uuid` | 生成唯一 ID |
+| 正则 | `regex` | 模板解析 |
+| 速率限制 | `governor` | 高性能令牌桶算法 |
+| 通知服务 | SMTP / Webhook | 审批通知、告警 |
+| 锁服务 | 文件锁 / Redis | 分布式部署场景 |
 
 ---
 
-## 11. Implementation Roadmap
+## 11. 实现路线图
 
-| Phase | Timeline | Deliverables |
+| 阶段 | 时间 | 交付物 |
 |:---|:---|:---|
-| Phase 1 | Week 1-2 | YAML parser + DAG scheduler + basic execution |
-| Phase 2 | Week 3-4 | HTTP/Shell executors + retry engine |
-| Phase 3 | Week 5-6 | Conditional branching + loops + parallel execution |
-| Phase 4 | Week 7-8 | Checkpoints + resume from breakpoint |
-| Phase 5 | Week 9-10 | OpenCLI integration + JSON output optimization |
-| Phase 6 | Week 11-12 | Documentation + testing + v1.0 release |
-| Phase 7 | Week 13-14 | Human-in-the-Loop + hooks mechanism |
-| Phase 8 | Week 15-16 | Triggers + version management + v2.0 production release |
+| Phase 1 | 第 1-2 周 | YAML 解析器 + DAG 调度器 + 基础执行 |
+| Phase 2 | 第 3-4 周 | HTTP/Shell 执行器 + 重试引擎 |
+| Phase 3 | 第 5-6 周 | 条件分支 + 循环 + 并行执行 |
+| Phase 4 | 第 7-8 周 | 检查点 + 断点续跑 |
+| Phase 5 | 第 9-10 周 | OpenCLI 集成 + JSON 输出优化 |
+| Phase 6 | 第 11-12 周 | 文档 + 测试 + 发布 v1.0 |
+| Phase 7 | 第 13-14 周 | Human-in-the-Loop + 钩子机制 |
+| Phase 8 | 第 15-16 周 | 触发器 + 版本管理 + 生产发布 v2.0 |
 
 ---
 
-## 12. Triggers
+## 12. 触发器 (Triggers)
 
-Workflows not only support manual CLI execution, but also need automated triggering.
+工作流不仅支持手动 CLI 执行，还需要支持自动化触发。
 
-### 13.1 YAML Definition
+### 13.1 YAML 定义
 
 ```yaml
 name: nightly-cleanup
-description: Daily cleanup task
+description: 每日清理任务
 
 trigger:
-  # Scheduled trigger
+  # 定时触发
   - type: cron
-    schedule: "0 2 * * *"      # Every day at 2 AM
+    schedule: "0 2 * * *"      # 每天凌晨 2 点
     timezone: Asia/Shanghai
     inputs:
       cleanup_level: full
       
-  # Webhook trigger
+  # Webhook 触发
   - type: webhook
     path: /hooks/deploy-complete
-    secret: ${{env.WEBHOOK_SECRET}}    # HMAC verification secret
+    secret: ${{env.WEBHOOK_SECRET}}    # HMAC 验证密钥
     inputs:
       environment: ${{event.body.environment}}
       
-  # File watch trigger
+  # 文件监听触发
   - type: file_watch
     path: /data/config/
     patterns: ["*.yaml", "*.json"]
-    debounce: 10s               # Debounce: multiple changes within 10 seconds trigger only once
+    debounce: 10s               # 防抖：10 秒内多次变化只触发一次
     
-  # Triggered by another workflow
+  # 另一个工作流触发
   - type: workflow_event
     event: deploy_failed
     source_workflow: deploy-app.yaml
@@ -2095,18 +2095,18 @@ steps:
     run: ./scripts/cleanup.sh --level ${{inputs.cleanup_level}}
 ```
 
-### 13.2 Trigger Event Context
+### 13.2 触发器事件上下文
 
-Different triggers provide different `event` variables:
+不同触发器提供不同的 `event` 变量：
 
 ```yaml
-# Cron trigger
+# Cron 触发
 event:
   type: "cron"
   scheduled_time: "2026-03-23T02:00:00Z"
   timezone: "Asia/Shanghai"
 
-# Webhook trigger  
+# Webhook 触发  
 event:
   type: "webhook"
   method: "POST"
@@ -2115,7 +2115,7 @@ event:
   body: { "environment": "production", "version": "v1.2.3" }
   query: { "token": "xxx" }
 
-# File watch trigger
+# 文件监听触发
 event:
   type: "file_watch"
   path: "/data/config/app.yaml"
@@ -2123,27 +2123,27 @@ event:
   timestamp: "2026-03-23T10:00:00Z"
 ```
 
-### 13.3 Trigger Management CLI
+### 13.3 触发器管理 CLI
 
 ```bash
-# List all triggers
+# 列出所有触发器
 flow-run trigger list
 
-# Manual trigger (for testing)
+# 手动触发（测试用）
 flow-run trigger fire nightly-cleanup --input cleanup_level=quick
 
-# View trigger history
+# 查看触发历史
 flow-run trigger history --last 20
 
-# Enable/disable trigger
+# 启用/禁用触发器
 flow-run trigger enable nightly-cleanup
 flow-run trigger disable nightly-cleanup
 
-# View trigger status
+# 查看触发器状态
 flow-run trigger status
 ```
 
-### 13.4 Trigger Implementation
+### 13.4 触发器实现
 
 ```rust
 enum TriggerType {
@@ -2154,7 +2154,7 @@ enum TriggerType {
 }
 
 struct CronTrigger {
-    schedule: String,          // cron expression
+    schedule: String,          // cron 表达式
     timezone: String,
     next_run: DateTime<Utc>,
 }
@@ -2162,7 +2162,7 @@ struct CronTrigger {
 struct WebhookTrigger {
     path: String,
     secret: Option<String>,
-    // Bind to HTTP server
+    // 绑定到 HTTP 服务器
 }
 
 struct FileWatchTrigger {
@@ -2178,13 +2178,13 @@ struct TriggerManager {
 
 impl TriggerManager {
     async fn start(&self) -> Result<(), TriggerError> {
-        // Start cron scheduler
+        // 启动 cron 调度器
         let cron_scheduler = self.start_cron_scheduler().await?;
         
-        // Start webhook server
+        // 启动 webhook 服务器
         let webhook_server = self.start_webhook_server().await?;
         
-        // Start file watcher
+        // 启动文件监听
         let file_watcher = self.start_file_watcher().await?;
         
         Ok(())
@@ -2194,10 +2194,10 @@ impl TriggerManager {
         let trigger = self.find_trigger(trigger_id).await;
         
         if trigger.enabled {
-            // Create execution context
+            // 创建执行上下文
             let context = ExecutionContext::from_trigger(trigger, event);
             
-            // Execute workflow asynchronously
+            // 异步执行工作流
             tokio::spawn(async move {
                 let runner = WorkflowRunner::new();
                 runner.run(&trigger.workflow_path, context).await;
@@ -2209,22 +2209,22 @@ impl TriggerManager {
 
 ---
 
-## 13. Version Management and Execution History
+## 13. 版本管理与执行历史
 
-### 14.1 Execution History Storage
+### 14.1 执行历史存储
 
 ```rust
 struct ExecutionRecord {
     id: String,                    // exec_550e8400
-    workflow_id: String,           // Workflow identifier
+    workflow_id: String,           // 工作流标识
     workflow_name: String,         // deploy-application
     workflow_file: String,         // deploy.yaml
-    workflow_hash: String,         // YAML file hash
+    workflow_hash: String,         // YAML 文件哈希
     started_at: DateTime<Utc>,
     completed_at: Option<DateTime<Utc>>,
     duration_ms: Option<u64>,
     status: ExecutionStatus,       // success | failed | paused | cancelled
-    trigger: TriggerInfo,          // Trigger method
+    trigger: TriggerInfo,          // 触发方式
     inputs: HashMap<String, Value>,
     outputs: Option<HashMap<String, Value>>,
     metrics: ExecutionMetrics,
@@ -2235,69 +2235,69 @@ enum ExecutionStatus {
     Running,
     Success,
     Failed,
-    Paused,      // Paused (has checkpoint)
-    Cancelled,   // Cancelled
+    Paused,      // 暂停（有检查点）
+    Cancelled,   // 取消
 }
 ```
 
-### 14.2 Execution History CLI
+### 14.2 执行历史 CLI
 
 ```bash
-# List recent executions
+# 列出最近执行
 flow-run history --last 10
 
-# Filter by workflow
+# 按工作流过滤
 flow-run history --workflow deploy.yaml
 
-# Filter by status
+# 按状态过滤
 flow-run history --status failed
 
-# Filter by time range
+# 按时间范围过滤
 flow-run history --since "2026-03-01" --until "2026-03-23"
 
-# View execution details
+# 查看执行详情
 flow-run history show exec_550e8400
 
-# View YAML at execution time (version snapshot)
+# 查看执行时的 YAML（版本快照）
 flow-run history show exec_550e8400 --workflow
 
-# Re-execute (using same inputs)
+# 重新执行（使用相同的输入）
 flow-run history rerun exec_550e8400
 
-# Export execution records
+# 导出执行记录
 flow-run history export --format json --output history.json
 ```
 
-### 14.3 Workflow Version Comparison
+### 14.3 工作流版本对比
 
 ```bash
-# Compare differences between two workflow definitions
+# 对比两个工作流定义的差异
 flow-run diff deploy.yaml deploy-v2.yaml
 
-# View version used by an execution
+# 查看某个执行使用的版本
 flow-run history show exec_550e8400 --diff-with-current
 
-# View workflow change history
+# 查看工作流变更历史
 flow-run log --workflow deploy.yaml
 ```
 
-### 14.4 Cleanup Strategy
+### 14.4 清理策略
 
 ```yaml
 config:
   history:
-    retention_days: 90          # Retain for 90 days
-    keep_successful: 50         # Keep last 50 successful executions
-    keep_failed: 100            # Keep last 100 failed executions
-    keep_paused: 10             # Keep all paused executions (manual cleanup)
+    retention_days: 90          # 保留 90 天
+    keep_successful: 50         # 保留最近 50 个成功执行
+    keep_failed: 100            # 保留最近 100 个失败执行
+    keep_paused: 10             # 保留所有暂停执行（手动清理）
     
   cleanup:
-    schedule: "0 3 * * *"       # Clean up every day at 3 AM
-    max_checkpoints: 50         # Max checkpoint count
+    schedule: "0 3 * * *"       # 每天凌晨 3 点清理
+    max_checkpoints: 50         # 最大检查点数量
 ```
 
 ```bash
-# Manual cleanup
+# 手动清理
 flow-run cleanup --older-than 30d
 flow-run cleanup --status success --older-than 7d
 ```
@@ -2305,87 +2305,87 @@ flow-run cleanup --status success --older-than 7d
 
 ---
 
-## 14. Unified Error Codes
+## 14. 统一错误码
 
 ```
-Axxx ─ Workflow errors
-├─ A001: Workflow file not found
-├─ A002: YAML parse failed
-├─ A003: Schema validation failed
-├─ A004: Cycle dependency
-├─ A005: Step not defined
-├─ A006: Workflow version incompatible
-└─ A007: Workflow file syntax changed (re-validation needed)
+Axxx ─ 工作流错误
+├─ A001: 工作流文件不存在
+├─ A002: YAML 解析失败
+├─ A003: Schema 验证失败
+├─ A004: 循环依赖
+├─ A005: 步骤未定义
+├─ A006: 工作流版本不兼容
+└─ A007: 工作流文件语法变更（需重新验证）
 
-Bxxx ─ Execution errors
-├─ B001: HTTP request failed
-├─ B002: Shell command failed
-├─ B003: Timed out
-├─ B004: Conditional expression error
-├─ B005: Loop exceeded max iterations
-├─ B006: Sub-workflow failed
-├─ B007: Concurrency limit
-└─ B008: Rate limiting
+Bxxx ─ 执行错误
+├─ B001: HTTP 请求失败
+├─ B002: Shell 命令失败
+├─ B003: 超时
+├─ B004: 条件表达式错误
+├─ B005: 循环超过最大迭代次数
+├─ B006: 子工作流失败
+├─ B007: 并发限制
+└─ B008: 速率限制
 
-Cxxx ─ Checkpoint errors
-├─ C001: Checkpoint not found
-├─ C002: Checkpoint corrupted
-├─ C003: Checkpoint write failed
-├─ C004: Checkpoint version incompatible
-└─ C005: Timeout expired (cannot recover)
+Cxxx ─ 检查点错误
+├─ C001: 检查点不存在
+├─ C002: 检查点损坏
+├─ C003: 检查点写入失败
+├─ C004: 检查点版本不兼容
+└─ C005: 超时已过期（无法恢复）
 
-Dxxx ─ Template errors
-├─ D001: Template syntax error
-├─ D002: Variable undefined
-├─ D003: Path not found
-├─ D004: Type mismatch
-└─ D005: Filter not found
+Dxxx ─ 模板错误
+├─ D001: 模板语法错误
+├─ D002: 变量未定义
+├─ D003: 路径不存在
+├─ D004: 类型不匹配
+└─ D005: 过滤器不存在
 
-Exxx ─ Approval errors (Human-in-the-Loop)
-├─ E001: Approval rejected
-├─ E002: Approval timeout
-├─ E003: Approver not authorized
-├─ E004: Approval service unavailable
-└─ E005: Auto-approval conditions invalid
+Exxx ─ 审批错误 (Human-in-the-Loop)
+├─ E001: 审批被拒绝
+├─ E002: 审批超时
+├─ E003: 审批人未授权
+├─ E004: 审批服务不可用
+└─ E005: 自动审批条件无效
 
-Fxxx ─ Hook errors
-├─ F001: Hook execution timeout
-├─ F002: Hook command failed
-├─ F003: Hook HTTP request failed
-└─ F004: Hook configuration invalid
+Fxxx ─ 钩子错误
+├─ F001: 钩子执行超时
+├─ F002: 钩子命令失败
+├─ F003: 钩子 HTTP 请求失败
+└─ F004: 钩子配置无效
 
-Gxxx ─ Trigger errors
-├─ G001: Webhook signature verification failed
-├─ G002: Cron expression invalid
-├─ G003: File watch path not found
-├─ G004: Trigger disabled
-└─ G005: Workflow not found
+Gxxx ─ 触发器错误
+├─ G001: Webhook 签名验证失败
+├─ G002: Cron 表达式无效
+├─ G003: 文件监听路径不存在
+├─ G004: 触发器已禁用
+└─ G005: 工作流不存在
 ```
 
 ---
 
-*Document version: v2.0*
-*Last updated: 2026-03-23*
-*Author: Sisyphus AI Architect*
+*文档版本：v2.0*
+*最后更新：2026-03-23*
+*作者：Sisyphus AI Architect*
 
-## Changelog
+## 变更日志
 
 ### v2.0 (2026-03-23)
-- Added Human-in-the-Loop (approval) step type
-- Added template expression filter chain support
-- Added hooks/events mechanism
-- Added step-level concurrency control and rate limiting
-- Added timeout chain design (checkpoint resume inherits remaining time)
-- Added sub-workflow error propagation strategy
-- Added trigger design (Cron/Webhook/File Watch)
-- Added version management and execution history
-- Extended error code system (Exxx/Fxxx/Gxxx)
+- 新增 Human-in-the-Loop (审批) 步骤类型
+- 新增模板表达式过滤器链支持
+- 新增钩子/事件机制 (Hooks)
+- 新增步骤级并发控制和速率限制
+- 新增超时链设计（检查点恢复继承剩余时间）
+- 新增子工作流错误传播策略
+- 新增触发器设计 (Cron/Webhook/File Watch)
+- 新增版本管理与执行历史
+- 扩展错误码体系（Exxx/Fxxx/Gxxx）
 
 ### v1.0 (2026-03-22)
-- Initial release
-- YAML workflow definition
-- DAG scheduling engine
-- HTTP/Shell/Loop/Condition executors
-- Checkpoints and resume from breakpoint
-- CLI interface and JSON output
+- 初始版本
+- YAML 工作流定义
+- DAG 调度引擎
+- HTTP/Shell/Loop/Condition 执行器
+- 检查点与断点续跑
+- CLI 接口与 JSON 输出
 
