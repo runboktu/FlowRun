@@ -374,6 +374,7 @@ steps:
             ],
             on: None,
             trigger: None,
+            variables: None,
         };
 
         let result = WorkflowParser::validate(&workflow);
@@ -467,6 +468,7 @@ steps:
             ],
             on: None,
             trigger: None,
+            variables: None,
         };
 
         let result = WorkflowParser::validate(&workflow);
@@ -597,6 +599,7 @@ steps:
             ],
             on: None,
             trigger: None,
+            variables: None,
         };
 
         let result = WorkflowParser::validate(&workflow);
@@ -728,6 +731,7 @@ steps:
             ],
             on: None,
             trigger: None,
+            variables: None,
         };
 
         let result = WorkflowParser::validate(&workflow);

@@ -1,94 +1,96 @@
-# flow-run 学习指南
+[中文](./flow-run-learning-report-zh.md) | English
 
-## 1. 项目简介
+# flow-run Learning Guide
 
-**flow-run** 是一个用 Rust 编写的**声明式工作流引擎**，专为 AI Agent 设计。它用 YAML 定义工作流，通过 DAG（有向无环图）调度引擎自动解析步骤依赖、并行执行无依赖步骤，并提供检查点断点续跑、条件分支、循环、模板表达式等能力。
+## 1. Project Overview
 
-**解决的核心问题：**
-- Agent 执行多步骤任务时缺乏编排能力
-- 失败后需从头重试，浪费已完成的工作
-- 无法并行执行无依赖步骤
-- 缺乏条件分支和循环支持
+**flow-run** is a **declarative workflow engine** written in Rust, designed specifically for AI Agents. It defines workflows via YAML, uses a DAG (Directed Acyclic Graph) scheduling engine to automatically resolve step dependencies, executes independent steps in parallel, and provides checkpoint-based resume, conditional branching, loops, template expressions, and more.
 
-**技术栈：** Rust 2021 Edition / Tokio（异步运行时）/ Clap（CLI）/ Serde（序列化）/ reqwest（HTTP）
+**Core Problems Solved:**
+- Lack of orchestration when Agents execute multi-step tasks
+- Need to retry from scratch after failure, wasting completed work
+- Inability to execute independent steps in parallel
+- Lack of conditional branching and loop support
+
+**Tech Stack:** Rust 2021 Edition / Tokio (async runtime) / Clap (CLI) / Serde (serialization) / reqwest (HTTP)
 
 ---
 
-## 2. 项目结构一览
+## 2. Project Structure Overview
 
 ```
 flow-run/
-├── Cargo.toml                    # Rust 项目配置与依赖
-├── flow-run-design.md            # 详细设计文档（强烈建议先读这个）
+├── Cargo.toml                    # Rust project configuration and dependencies
+├── flow-run-design.md            # Detailed design document (highly recommended to read first)
 │
 ├── src/
-│   ├── main.rs                   # CLI 入口，命令分发
-│   ├── lib.rs                    # 库入口，导出 4 个子模块
+│   ├── main.rs                   # CLI entry point, command dispatch
+│   ├── lib.rs                    # Library entry, exports 4 sub-modules
 │   │
-│   ├── core/                     # 核心引擎（YAML 解析 → DAG 调度 → 执行）
-│   │   ├── types.rs              # 所有类型定义（~767 行，最重要的文件）
-│   │   ├── parser.rs             # YAML 解析 + 验证（唯一性、依赖、循环检测）
-│   │   ├── dag.rs                # DAG 调度器 + Scheduler 执行引擎（~896 行）
-│   │   ├── context.rs            # 执行上下文（输入/输出/变量/状态追踪）
-│   │   └── template.rs           # 模板表达式引擎（${{...}} 语法 + 过滤器）
+│   ├── core/                     # Core engine (YAML parsing → DAG scheduling → Execution)
+│   │   ├── types.rs              # All type definitions (~767 lines, most important file)
+│   │   ├── parser.rs             # YAML parsing + validation (uniqueness, dependencies, cycle detection)
+│   │   ├── dag.rs                # DAG scheduler + Scheduler execution engine (~896 lines)
+│   │   ├── context.rs            # Execution context (inputs/outputs/variables/state tracking)
+│   │   └── template.rs           # Template expression engine (${{...}} syntax + filters)
 │   │
-│   ├── executors/                # 步骤执行器
-│   │   ├── mod.rs                # Executor trait 定义
-│   │   ├── http.rs               # HTTP 请求执行器
-│   │   ├── shell.rs              # Shell 命令执行器
-│   │   ├── loop.rs               # 循环执行器
-│   │   ├── condition.rs          # 条件分支执行器
-│   │   ├── workflow.rs           # 子工作流执行器（含 WorkflowRunner trait）
-│   │   └── approve.rs            # 人工审批执行器
+│   ├── executors/                # Step executors
+│   │   ├── mod.rs                # Executor trait definition
+│   │   ├── http.rs               # HTTP request executor
+│   │   ├── shell.rs              # Shell command executor
+│   │   ├── loop.rs               # Loop executor
+│   │   ├── condition.rs          # Conditional branch executor
+│   │   ├── workflow.rs           # Sub-workflow executor (includes WorkflowRunner trait)
+│   │   └── approve.rs            # Manual approval executor
 │   │
-│   ├── cli/                      # 命令行接口
+│   ├── cli/                      # Command-line interface
 │   │   ├── mod.rs
-│   │   └── commands.rs           # Clap 定义所有子命令（run/resume/validate/...）
+│   │   └── commands.rs           # Clap definitions for all subcommands (run/resume/validate/...)
 │   │
-│   └── utils/                    # 工具模块
+│   └── utils/                    # Utility modules
 │       ├── mod.rs
-│       ├── error.rs              # 统一错误类型（分类编码：A/B/C/D/E/F/G）
-│       ├── retry.rs              # 重试引擎（固定/指数/斐波那契退避 + 抖动）
-│       └── checkpoint.rs         # 检查点管理（保存/加载/超时上下文）
+│       ├── error.rs              # Unified error types (category codes: A/B/C/D/E/F/G)
+│       ├── retry.rs              # Retry engine (fixed/exponential/Fibonacci backoff + jitter)
+│       └── checkpoint.rs         # Checkpoint management (save/load/timeout context)
 │
-└── examples/                     # YAML 工作流示例（11 个，从基础到综合）
-    ├── 01_basic_http.yaml        # HTTP 请求
-    ├── 02_basic_shell.yaml       # Shell 命令
-    ├── 03_basic_dependencies.yaml # 步骤依赖
-    ├── 04_intermediate_parallel.yaml  # 并行执行
-    ├── 05_intermediate_retry.yaml     # 重试
-    ├── 06_intermediate_templates.yaml # 模板表达式
-    ├── 07_advanced_loop.yaml          # 循环
-    ├── 08_advanced_condition.yaml     # 条件分支
-    ├── 09_advanced_subworkflow.yaml   # 子工作流
-    ├── 10_advanced_approval.yaml      # 人工审批
-    ├── 11_comprehensive_cicd.yaml     # 综合 CI/CD
-    └── code/                           # Rust 代码示例（7 个）
+└── examples/                     # YAML workflow examples (11, from basic to comprehensive)
+    ├── 01_basic_http.yaml        # HTTP request
+    ├── 02_basic_shell.yaml       # Shell command
+    ├── 03_basic_dependencies.yaml # Step dependencies
+    ├── 04_intermediate_parallel.yaml  # Parallel execution
+    ├── 05_intermediate_retry.yaml     # Retry
+    ├── 06_intermediate_templates.yaml # Template expressions
+    ├── 07_advanced_loop.yaml          # Loop
+    ├── 08_advanced_condition.yaml     # Conditional branch
+    ├── 09_advanced_subworkflow.yaml   # Sub-workflow
+    ├── 10_advanced_approval.yaml      # Manual approval
+    ├── 11_comprehensive_cicd.yaml     # Comprehensive CI/CD
+    └── code/                           # Rust code examples (7)
 ```
 
 ---
 
-## 3. 核心概念速览
+## 3. Core Concepts Overview
 
-### 3.1 YAML 工作流定义
+### 3.1 YAML Workflow Definition
 
-一个 flow-run 工作流就是一个 YAML 文件，包含以下顶层字段：
+A flow-run workflow is a YAML file with the following top-level fields:
 
 ```yaml
-name: deploy-application          # 工作流名称
-description: 自动化部署工作流     # 描述（可选）
-version: "1.0"                    # 版本（可选）
+name: deploy-application          # Workflow name
+description: Automated deployment workflow  # Description (optional)
+version: "1.0"                    # Version (optional)
 
-config:                           # 全局配置
-  timeout: 300s                   #   总超时
-  retry:                          #   全局重试策略
+config:                           # Global configuration
+  timeout: 300s                   #   Total timeout
+  retry:                          #   Global retry strategy
     max_attempts: 3
     strategy: exponential
-  on_failure: pause               #   失败策略: abort / pause / continue
-  checkpoint: /tmp/deploy.state   #   检查点路径
-  max_concurrent: 5               #   最大并发数
+  on_failure: pause               #   Failure strategy: abort / pause / continue
+  checkpoint: /tmp/deploy.state   #   Checkpoint path
+  max_concurrent: 5               #   Max concurrency
 
-inputs:                           # 输入参数定义
+inputs:                           # Input parameter definitions
   - name: app_name
     type: string
     required: true
@@ -97,378 +99,378 @@ inputs:                           # 输入参数定义
     default: staging
     enum: [staging, production]
 
-outputs:                          # 输出定义
+outputs:                          # Output definitions
   deployment_id: ${{steps.deploy.response.body.id}}
 
-steps:                            # 步骤列表
+steps:                            # Step list
   - id: fetch_data
     type: http
     api: https://api.example.com/data
     method: GET
 ```
 
-### 3.2 七种步骤类型
+### 3.2 Seven Step Types
 
-| 类型 | 用途 | 关键字段 |
+| Type | Purpose | Key Fields |
 |:---|:---|:---|
-| `http` | HTTP API 调用 | `api`, `method`, `headers`, `body`, `cache` |
-| `shell` | 执行 Shell 命令 | `run`, `env`, `safe_mode`, `allowed_commands` |
-| `parallel` | 并行执行子步骤 | `steps`, `max_concurrent`, `rate_limit` |
-| `loop` | 循环执行 | `loop`（forEach/while/range）, `do_steps` |
-| `condition` | 条件分支 | `expression`, `then_steps`, `else_steps` |
-| `workflow` | 子工作流 | `workflow`(路径), `inputs`, `error_strategy` |
-| `approve` | 人工审批 | `message`, `approvers`, `auto_approve_on` |
+| `http` | HTTP API calls | `api`, `method`, `headers`, `body`, `cache` |
+| `shell` | Execute Shell commands | `run`, `env`, `safe_mode`, `allowed_commands` |
+| `parallel` | Execute sub-steps in parallel | `steps`, `max_concurrent`, `rate_limit` |
+| `loop` | Loop execution | `loop` (forEach/while/range), `do_steps` |
+| `condition` | Conditional branching | `expression`, `then_steps`, `else_steps` |
+| `workflow` | Sub-workflow | `workflow` (path), `inputs`, `error_strategy` |
+| `approve` | Manual approval | `message`, `approvers`, `auto_approve_on` |
 
-### 3.3 依赖与并行
+### 3.4 Dependencies and Parallelism
 
-步骤之间通过 `depends_on` 声明依赖。DAG 调度器自动进行拓扑排序，将步骤分批执行——**同一批次内无依赖关系的步骤并行执行**。
+Steps declare dependencies via `depends_on`. The DAG scheduler automatically performs topological sorting, executing steps in batches — **steps within the same batch that have no dependencies on each other execute in parallel**.
 
 ```yaml
 steps:
-  - id: fetch_data          # 批次 1
+  - id: fetch_data          # Batch 1
     type: http
     api: https://api.example.com/data
 
-  - id: prepare_env         # 批次 1（与 fetch_data 并行）
+  - id: prepare_env         # Batch 1 (parallel with fetch_data)
     type: shell
     run: "mkdir -p /tmp/output"
 
-  - id: process_data        # 批次 2（依赖 fetch_data）
+  - id: process_data        # Batch 2 (depends on fetch_data)
     type: shell
     run: "cat /tmp/data | jq"
     depends_on: [fetch_data]
 
-  - id: save_result         # 批次 3（依赖 process_data 和 prepare_env）
+  - id: save_result         # Batch 3 (depends on process_data and prepare_env)
     type: shell
     run: "cp /tmp/data /output"
     depends_on: [process_data, prepare_env]
 ```
 
-### 3.4 模板表达式
+### 3.4 Template Expressions
 
-使用 `${{...}}` 语法引用变量、步骤输出，并支持过滤器链：
+Use `${{...}}` syntax to reference variables, step outputs, and apply filter chains:
 
 ```yaml
-# 变量引用
+# Variable reference
 api: ${{ inputs.api_url }}
 
-# 步骤输出引用（嵌套路径 + 数组索引）
+# Step output reference (nested path + array index)
 item: ${{ steps.fetch.outputs.data.items[0].name }}
 
-# 过滤器链（管道符串联）
+# Filter chain (pipe-separated)
 message: ${{ steps.check.outputs.result | uppercase | truncate(50) }}
 
-# 默认值
+# Default value
 fallback: ${{ steps.optional.value | default("unknown") }}
 
-# 条件表达式
+# Conditional expression
 env: ${{ inputs.environment || "staging" }}
 ```
 
-**内置过滤器：** `uppercase`, `lowercase`, `capitalize`, `trim`, `default(val)`, `to_json`, `from_json`, `length`, `slice(s,e)`, `first`, `last`, `join(sep)`, `split(sep)`, `replace(old,new)`, `regex_extract(pat)`, `truncate(n)`, `base64_encode`, `base64_decode`, `format_timestamp`, `format_duration`
+**Built-in filters:** `uppercase`, `lowercase`, `capitalize`, `trim`, `default(val)`, `to_json`, `from_json`, `length`, `slice(s,e)`, `first`, `last`, `join(sep)`, `split(sep)`, `replace(old,new)`, `regex_extract(pat)`, `truncate(n)`, `base64_encode`, `base64_decode`, `format_timestamp`, `format_duration`
 
 ---
 
-## 4. 架构与执行流程
+## 4. Architecture and Execution Flow
 
-### 4.1 整体流水线
-
-```
-YAML 文件 → Parser → Validator → DAG Scheduler → Executor(s) → Result
-              │         │           │               │
-              │         │           │               ├─ HTTP Executor
-              │         │           │               ├─ Shell Executor
-              │         │           │               ├─ Parallel Executor
-              │         │           │               ├─ Loop Executor
-              │         │           │               ├─ Condition Executor
-              │         │           │               ├─ Workflow Executor
-              │         │           │               └─ Approve Executor
-              │         │           │
-              │         │           └─ 检查点管理（每批次后保存）
-              │         │
-              │         └─ 循环依赖检测（DFS）
-              └─ serde_yaml 反序列化
-```
-
-### 4.2 关键数据流
-
-1. **Parser** (`core/parser.rs`) 将 YAML 解析为 `WorkflowDefinition` 结构体
-2. **DagScheduler** (`core/dag.rs`) 从 `WorkflowDefinition` 构建邻接表和入度表
-3. **topological_sort** 执行 Kahn 算法，将步骤分成多个批次（`Vec<Vec<StepId>>`）
-4. **Scheduler::run** 按批次执行，每个批次内通过 `tokio::spawn` 并行执行，用 `Semaphore` 控制并发
-5. 每个步骤的结果写入 `ExecutionContext`，后续步骤可以通过模板引擎引用前序步骤的输出
-
-### 4.3 核心结构体关系
+### 4.1 Overall Pipeline
 
 ```
-WorkflowDefinition（顶层定义）
+YAML File → Parser → Validator → DAG Scheduler → Executor(s) → Result
+               │         │           │               │
+               │         │           │               ├─ HTTP Executor
+               │         │           │               ├─ Shell Executor
+               │         │           │               ├─ Parallel Executor
+               │         │           │               ├─ Loop Executor
+               │         │           │               ├─ Condition Executor
+               │         │           │               ├─ Workflow Executor
+               │         │           │               └─ Approve Executor
+               │         │           │
+               │         │           └─ Checkpoint management (saved after each batch)
+               │         │
+               │         └─ Cycle dependency detection (DFS)
+               └─ serde_yaml deserialization
+```
+
+### 4.2 Key Data Flow
+
+1. **Parser** (`core/parser.rs`) parses YAML into a `WorkflowDefinition` struct
+2. **DagScheduler** (`core/dag.rs`) builds adjacency list and in-degree table from `WorkflowDefinition`
+3. **topological_sort** runs Kahn's algorithm, splitting steps into batches (`Vec<Vec<StepId>>`)
+4. **Scheduler::run** executes by batch; within each batch, steps run in parallel via `tokio::spawn`, with concurrency controlled by `Semaphore`
+5. Each step's result is written to `ExecutionContext`, allowing subsequent steps to reference previous step outputs via the template engine
+
+### 4.3 Core Struct Relationships
+
+```
+WorkflowDefinition (top-level definition)
 ├── config: WorkflowConfig
 ├── inputs: Vec<InputDefinition>
 ├── outputs: HashMap<String, String>
-├── steps: Vec<StepDefinition>     ←── 每个步骤可以包含子步骤
+├── steps: Vec<StepDefinition>     ←── Each step can contain sub-steps
 │   ├── id, name, type
 │   ├── depends_on: Vec<String>
-│   ├── steps (parallel 子步骤)
+│   ├── steps (parallel sub-steps)
 │   ├── then_steps / else_steps (condition)
-│   ├── do_steps (loop 循环体)
-│   └── workflow (子工作流路径)
+│   ├── do_steps (loop body)
+│   └── workflow (sub-workflow path)
 ├── on: HooksConfig
 └── trigger: Vec<TriggerConfig>
 
-ExecutionContext（运行时状态）
+ExecutionContext (runtime state)
 ├── inputs: HashMap<String, Value>
-├── step_outputs: HashMap<StepId, StepResult>  ←── 步骤间数据传递的核心
+├── step_outputs: HashMap<StepId, StepResult>  ←── Core of inter-step data passing
 ├── completed_steps: HashSet<StepId>
 ├── failed_steps: HashSet<StepId>
 └── variables: HashMap<String, Value>
 
-StepResult（单步执行结果）
+StepResult (single step execution result)
 ├── step_id, status, started_at, completed_at, duration_ms
-├── output: Option<Value>           ←── 被后续步骤通过模板引用
+├── output: Option<Value>           ←── Referenced by subsequent steps via templates
 └── error: Option<StepError>
 ```
 
 ---
 
-## 5. 核心模块详解
+## 5. Core Module Details
 
-### 5.1 类型系统 (`core/types.rs`)
+### 5.1 Type System (`core/types.rs`)
 
-这是整个项目最重要的文件（~767 行），定义了所有数据结构。关键类型：
+This is the most important file in the entire project (~767 lines), defining all data structures. Key types:
 
-| 类型 | 说明 |
+| Type | Description |
 |:---|:---|
-| `WorkflowDefinition` | 工作流顶层定义 |
-| `StepDefinition` | 步骤定义（一个大 struct，包含所有步骤类型的字段） |
-| `StepType` | 步骤类型枚举：Http/Shell/Parallel/Loop/Condition/Workflow/Approve |
-| `WorkflowConfig` | 全局配置（超时、重试、并发、检查点、恢复策略等） |
-| `StepResult` | 步骤执行结果（提供 `success()`/`failed()`/`skipped()` 构造方法） |
-| `WorkflowResult` | 工作流最终结果（状态、指标、步骤结果列表、输出、错误） |
-| `LoopConfig` | 循环配置（ForEach/While/Range 三种模式） |
-| `OnFailureStrategy` | 失败策略：Abort（中止）/ Pause（暂停保存检查点）/ Continue（继续） |
+| `WorkflowDefinition` | Top-level workflow definition |
+| `StepDefinition` | Step definition (a large struct containing fields for all step types) |
+| `StepType` | Step type enum: Http/Shell/Parallel/Loop/Condition/Workflow/Approve |
+| `WorkflowConfig` | Global configuration (timeout, retry, concurrency, checkpoint, resume strategy, etc.) |
+| `StepResult` | Step execution result (provides `success()`/`failed()`/`skipped()` constructors) |
+| `WorkflowResult` | Workflow final result (status, metrics, step result list, outputs, errors) |
+| `LoopConfig` | Loop configuration (ForEach/While/Range modes) |
+| `OnFailureStrategy` | Failure strategy: Abort / Pause (save checkpoint) / Continue |
 
-`StepDefinition` 使用一个扁平的大 struct 来兼容所有步骤类型——每种类型只使用自己关心的字段，其他字段为 `None`。这是一种常见的 Rust 模式，虽然字段多但避免了 enum 嵌套的复杂性。
+`StepDefinition` uses a flat struct to accommodate all step types — each type only uses its relevant fields, with others set to `None`. This is a common Rust pattern that trades more fields for avoiding nested enum complexity.
 
-### 5.2 YAML 解析与验证 (`core/parser.rs`)
+### 5.2 YAML Parsing and Validation (`core/parser.rs`)
 
-`WorkflowParser` 提供 3 个核心方法：
+`WorkflowParser` provides 3 core methods:
 
 ```rust
-// 从文件加载
+// Load from file
 WorkflowParser::from_file("workflow.yaml")?;
-// 从字符串解析
+// Parse from string
 WorkflowParser::from_str(yaml_content)?;
-// 验证工作流定义
+// Validate workflow definition
 WorkflowParser::validate(&workflow)?;
 ```
 
-验证包括三步：
-1. **步骤 ID 唯一性检查** — 递归检查所有子步骤（parallel 的 steps、condition 的 then/else_steps、loop 的 do_steps）
-2. **依赖关系有效性** — 确保每个 `depends_on` 引用的步骤 ID 确实存在
-3. **循环依赖检测** — 使用 DFS 在递归栈中检测回边
+Validation includes three steps:
+1. **Step ID uniqueness check** — Recursively checks all sub-steps (parallel steps, condition then/else_steps, loop do_steps)
+2. **Dependency validity** — Ensures each `depends_on` reference points to an existing step ID
+3. **Cycle dependency detection** — Uses DFS to detect back edges in the recursion stack
 
-### 5.3 DAG 调度器 (`core/dag.rs`)
+### 5.3 DAG Scheduler (`core/dag.rs`)
 
-**DagScheduler** 负责构建依赖图和拓扑排序：
-- 维护 `adjacency`（邻接表）和 `in_degree`（入度表）
-- `topological_sort()` 返回 `Vec<Vec<StepId>>`，即分批的执行计划
-- 使用 Kahn 算法（BFS 层序），每层的节点构成一个批次
+**DagScheduler** is responsible for building the dependency graph and performing topological sorting:
+- Maintains `adjacency` (adjacency list) and `in_degree` (in-degree table)
+- `topological_sort()` returns `Vec<Vec<StepId>>`, the batched execution plan
+- Uses Kahn's algorithm (BFS level-order), where each level's nodes form a batch
 
-**Scheduler** 是真正的执行引擎：
-- `run()` — 从头执行工作流
-- `resume()` — 从检查点恢复执行
-- `execute_batch()` — 用 `Semaphore` 控制并发的 `tokio::spawn` 并行执行
-- `execute_step()` — 根据步骤类型分发到不同的执行方法
+**Scheduler** is the actual execution engine:
+- `run()` — Execute workflow from the beginning
+- `resume()` — Resume execution from a checkpoint
+- `execute_batch()` — Parallel execution via `tokio::spawn` with `Semaphore` concurrency control
+- `execute_step()` — Dispatch to different execution methods based on step type
 
-### 5.4 执行上下文 (`core/context.rs`)
+### 5.4 Execution Context (`core/context.rs`)
 
-`ExecutionContext` 是运行时的"共享状态仓库"：
-- 存储所有输入参数、步骤输出、变量
-- 提供 `evaluate()` 方法求值 `${{...}}` 表达式
-- 提供 `resolve_path()` 方法解析点号分隔的路径（如 `steps.deploy.response.body.data[0]`）
-- 追踪步骤完成/失败状态
+`ExecutionContext` is the runtime "shared state store":
+- Stores all input parameters, step outputs, and variables
+- Provides `evaluate()` method to evaluate `${{...}}` expressions
+- Provides `resolve_path()` method to resolve dot-separated paths (e.g., `steps.deploy.response.body.data[0]`)
+- Tracks step completion/failure status
 
-### 5.5 模板表达式引擎 (`core/template.rs`)
+### 5.5 Template Expression Engine (`core/template.rs`)
 
-`TemplateEngine` 处理 `${{...}}` 模板表达式，支持：
-- **路径访问**：`inputs.api_url`、`steps.fetch.response.body.data[0].name`
-- **过滤器链**：`value | uppercase | truncate(10)`
-- **条件表达式**：`inputs.env || "staging"`、`inputs.count == 10`
-- **18 种内置过滤器**
+`TemplateEngine` processes `${{...}}` template expressions, supporting:
+- **Path access**: `inputs.api_url`, `steps.fetch.response.body.data[0].name`
+- **Filter chains**: `value | uppercase | truncate(10)`
+- **Conditional expressions**: `inputs.env || "staging"`, `inputs.count == 10`
+- **18 built-in filters**
 
-实现要点：
-- 用 `Regex` 匹配 `${{...}}` 模式
-- `find_operator()` 方法智能识别 `||` 和 `==` 操作符，忽略引号内和括号内的同名字符
-- `navigate_path()` 返回 `Value::Null` 而非报错，配合 `default` 和 `||` 使用
+Implementation highlights:
+- Uses `Regex` to match `${{...}}` patterns
+- `find_operator()` method intelligently identifies `||` and `==` operators, ignoring same-named characters inside quotes and parentheses
+- `navigate_path()` returns `Value::Null` instead of erroring, working with `default` and `||` usage
 
-### 5.6 步骤执行器 (`executors/`)
+### 5.6 Step Executors (`executors/`)
 
-每个执行器实现 `Executor` trait（除 `WorkflowExecutor` 使用 `WorkflowRunner` trait）：
+Each executor implements the `Executor` trait (except `WorkflowExecutor` which uses the `WorkflowRunner` trait):
 
-| 执行器 | 文件 | 职责 |
+| Executor | File | Responsibility |
 |:---|:---|:---|
-| HTTP Executor | `executors/http.rs` | 构建请求、发送、解析响应、期望验证 |
-| Shell Executor | `executors/shell.rs` | 执行 `sh -c`、环境变量注入、安全模式检查 |
-| Loop Executor | `executors/loop.rs` | ForEach/While/Range 三种循环模式 |
-| Condition Executor | `executors/condition.rs` | 求值表达式，执行 then/else 分支 |
-| Workflow Executor | `executors/workflow.rs` | 加载子工作流、准备输入、上下文隔离 |
-| Approve Executor | `executors/approve.rs` | 人工审批（发送通知、轮询结果、超时处理） |
+| HTTP Executor | `executors/http.rs` | Build request, send, parse response, validate expectations |
+| Shell Executor | `executors/shell.rs` | Execute `sh -c`, inject environment variables, safety mode check |
+| Loop Executor | `executors/loop.rs` | ForEach/While/Range loop modes |
+| Condition Executor | `executors/condition.rs` | Evaluate expression, execute then/else branches |
+| Workflow Executor | `executors/workflow.rs` | Load sub-workflow, prepare inputs, context isolation |
+| Approve Executor | `executors/approve.rs` | Manual approval (send notifications, poll results, handle timeout) |
 
-### 5.7 重试引擎 (`utils/retry.rs`)
+### 5.7 Retry Engine (`utils/retry.rs`)
 
-`RetryEngine` 提供带退避策略的自动重试：
-- 三种退避策略：Fixed（固定）、Exponential（指数，`delay = initial * factor^attempt`）、Fibonacci（斐波那契）
-- 抖动（jitter）避免惊群效应：在计算出的延迟基础上乘以 0.8~1.2 的随机因子
-- 可配置可重试的 HTTP 状态码（默认 408/429/500/502/503/504）和错误类型
-- 最大延迟上限（默认 30s）
+`RetryEngine` provides automatic retry with backoff strategies:
+- Three backoff strategies: Fixed, Exponential (`delay = initial * factor^attempt`), Fibonacci
+- Jitter to avoid thundering herd: multiplies computed delay by a random factor of 0.8~1.2
+- Configurable retryable HTTP status codes (default: 408/429/500/502/503/504) and error types
+- Maximum delay cap (default: 30s)
 
-### 5.8 检查点系统 (`utils/checkpoint.rs`)
+### 5.8 Checkpoint System (`utils/checkpoint.rs`)
 
-检查点实现断点续跑：
-- `Checkpoint` 结构体保存完整的执行状态（已完成步骤、失败步骤、步骤输出、变量、当前批次、超时上下文）
-- `CheckpointManager` 提供保存（JSON 文件）、加载、列出、删除操作
-- `TimeoutContext` 追踪工作流级和步骤级的超时消耗，恢复时可以继承剩余超时
+Checkpoints enable resume from breakpoint:
+- `Checkpoint` struct saves complete execution state (completed steps, failed steps, step outputs, variables, current batch, timeout context)
+- `CheckpointManager` provides save (JSON file), load, list, and delete operations
+- `TimeoutContext` tracks workflow-level and step-level timeout consumption, allowing resumption to inherit remaining timeout
 
-### 5.9 错误体系 (`utils/error.rs`)
+### 5.9 Error System (`utils/error.rs`)
 
-错误类型使用字母编码分类，便于 Agent 解析：
+Error types use letter-coded categories for easy Agent parsing:
 
-| 前缀 | 类别 | 示例 |
+| Prefix | Category | Examples |
 |:---|:---|:---|
-| A | 工作流错误 | A001 文件不存在、A004 循环依赖 |
-| B | 执行错误 | B001 HTTP 失败、B003 超时 |
-| C | 检查点错误 | C001 检查点不存在 |
-| D | 模板错误 | D002 变量未定义、D005 过滤器不存在 |
-| E | 审批错误 | E001 审批被拒绝 |
-| F | 钩子错误 | F001 钩子超时 |
-| G | 触发器错误 | G001 Webhook 签名无效 |
+| A | Workflow errors | A001 file not found, A004 cycle dependency |
+| B | Execution errors | B001 HTTP failure, B003 timeout |
+| C | Checkpoint errors | C001 checkpoint not found |
+| D | Template errors | D002 variable undefined, D005 filter not found |
+| E | Approval errors | E001 approval rejected |
+| F | Hook errors | F001 hook timeout |
+| G | Trigger errors | G001 Webhook signature invalid |
 
 ---
 
-## 6. CLI 使用方法
+## 6. CLI Usage
 
 ```
 flow-run <WORKFLOW_FILE> [OPTIONS] <SUBCOMMAND>
 
-子命令：
-  run         执行工作流
-  resume      从检查点恢复
-  validate    验证工作流定义
-  dry-run     模拟执行
-  checkpoint  检查点管理（list/show/clean）
-  history     查看执行历史
-  schema      输出 JSON Schema
+Subcommands:
+  run         Execute workflow
+  resume      Resume from checkpoint
+  validate    Validate workflow definition
+  dry-run     Simulate execution
+  checkpoint  Checkpoint management (list/show/clean)
+  history     View execution history
+  schema      Output JSON Schema
 ```
 
 ```bash
-# 执行工作流
+# Execute workflow
 flow-run workflow.yaml run --input key=value --json
 
-# 验证工作流（显示 DAG 结构）
+# Validate workflow (show DAG structure)
 flow-run workflow.yaml validate --show-dag
 
-# 试运行
+# Dry run
 flow-run workflow.yaml dry-run
 
-# 从检查点恢复
+# Resume from checkpoint
 flow-run workflow.yaml resume --checkpoint_id cp_xxx
 
-# 列出检查点
+# List checkpoints
 flow-run workflow.yaml checkpoint list --verbose
 ```
 
 ---
 
-## 7. 学习路径建议
+## 7. Recommended Learning Path
 
-### 第一阶段：理解设计（读 design.md）
+### Phase 1: Understand the Design (read design.md)
 
-先读 `flow-run-design.md`，里面有完整的架构图、数据结构设计、伪代码示例。这是最快建立全局认知的方式。
+Start with `flow-run-design.md`, which contains complete architecture diagrams, data structure designs, and pseudocode examples. This is the fastest way to build a holistic understanding.
 
-### 第二阶段：跑通示例
+### Phase 2: Run the Examples
 
-按顺序运行 `examples/` 下的 YAML 示例：
+Run the YAML examples in `examples/` in order:
 
 ```bash
-# 基础
+# Basic
 cargo run -- examples/01_basic_http.yaml validate
 cargo run -- examples/02_basic_shell.yaml validate
 cargo run -- examples/03_basic_dependencies.yaml validate
 
-# 中级
+# Intermediate
 cargo run -- examples/04_intermediate_parallel.yaml validate
 cargo run -- examples/05_intermediate_retry.yaml validate
 cargo run -- examples/06_intermediate_templates.yaml validate
 
-# 高级
+# Advanced
 cargo run -- examples/07_advanced_loop.yaml validate
 cargo run -- examples/08_advanced_condition.yaml validate
 cargo run -- examples/09_advanced_subworkflow.yaml validate
 cargo run -- examples/10_advanced_approval.yaml validate
 
-# 综合
+# Comprehensive
 cargo run -- examples/11_comprehensive_cicd.yaml validate
 ```
 
-### 第三阶段：读核心源码（按依赖顺序）
+### Phase 3: Read Core Source Code (in dependency order)
 
-1. **`src/core/types.rs`** — 所有类型定义，理解数据模型
-2. **`src/utils/error.rs`** — 错误体系，理解错误分类
-3. **`src/core/parser.rs`** — YAML 解析和验证逻辑
-4. **`src/core/context.rs`** — 执行上下文和表达式求值
-5. **`src/core/template.rs`** — 模板引擎和过滤器系统
-6. **`src/core/dag.rs`** — DAG 调度器 + Scheduler 执行引擎
-7. **`src/utils/retry.rs`** — 重试引擎
-8. **`src/utils/checkpoint.rs`** — 检查点系统
-9. **`src/executors/*.rs`** — 各类步骤执行器
-10. **`src/cli/commands.rs`** — CLI 命令定义
-11. **`src/main.rs`** — 入口函数，串联以上所有模块
+1. **`src/core/types.rs`** — All type definitions, understand the data model
+2. **`src/utils/error.rs`** — Error system, understand error categorization
+3. **`src/core/parser.rs`** — YAML parsing and validation logic
+4. **`src/core/context.rs`** — Execution context and expression evaluation
+5. **`src/core/template.rs`** — Template engine and filter system
+6. **`src/core/dag.rs`** — DAG scheduler + Scheduler execution engine
+7. **`src/utils/retry.rs`** — Retry engine
+8. **`src/utils/checkpoint.rs`** — Checkpoint system
+9. **`src/executors/*.rs`** — Various step executors
+10. **`src/cli/commands.rs`** — CLI command definitions
+11. **`src/main.rs`** — Entry function, connecting all modules
 
-### 第四阶段：看 Rust 代码示例
+### Phase 4: Review Rust Code Examples
 
-`examples/code/` 下有 7 个 Rust 代码示例，展示如何作为库使用 flow-run：
-- `01_load_workflow` — 加载工作流
-- `02_execution_context` — 执行上下文
-- `03_dag_scheduler` — DAG 调度
-- `04_template_engine` — 模板引擎
-- `05_retry_engine` — 重试引擎
-- `06_checkpoint` — 检查点
-- `07_full_execution` — 完整执行
+`examples/code/` contains 7 Rust code examples demonstrating how to use flow-run as a library:
+- `01_load_workflow` — Load a workflow
+- `02_execution_context` — Execution context
+- `03_dag_scheduler` — DAG scheduling
+- `04_template_engine` — Template engine
+- `05_retry_engine` — Retry engine
+- `06_checkpoint` — Checkpoint
+- `07_full_execution` — Full execution
 
-### 第五阶段：运行测试
+### Phase 5: Run Tests
 
 ```bash
-cargo test          # 运行所有测试
-cargo test -- --nocapture  # 显示测试输出
+cargo test          # Run all tests
+cargo test -- --nocapture  # Show test output
 ```
 
 ---
 
-## 8. 关键设计决策解读
+## 8. Key Design Decision Analysis
 
-### 8.1 为什么用 Rust？
+### 8.1 Why Rust?
 
-- AI Agent 需要非交互式、结构化输出的工具
-- Rust 提供内存安全、零成本异步（tokio）、单二进制部署
-- JSON 原生输出，无需 `--json` 标志
+- AI Agents need non-interactive, structured-output tools
+- Rust provides memory safety, zero-cost async (tokio), and single-binary deployment
+- Native JSON output, no `--json` flag needed
 
-### 8.2 为什么用扁平 struct 而非 enum 嵌套？
+### 8.2 Why Flat Struct Instead of Nested Enums?
 
-`StepDefinition` 是一个大 struct，包含所有步骤类型的字段。这简化了 YAML 反序列化——Serde 可以直接将 YAML 映射到 struct，不需要复杂的 tag 解析。缺点是字段多（约 30 个），但通过 `Option<T>` 保证类型安全。
+`StepDefinition` is a large struct containing fields for all step types. This simplifies YAML deserialization — Serde can directly map YAML to the struct without complex tag parsing. The tradeoff is more fields (~30), but type safety is maintained through `Option<T>`.
 
-### 8.3 检查点如何实现断点续跑？
+### 8.3 How Does Checkpointing Enable Resume?
 
-每次执行完一个批次后，Scheduler 将当前状态序列化为 JSON 保存。恢复时，加载检查点、跳过已完成的批次、从下一个批次继续执行。`TimeoutContext` 保存已消耗时间，恢复时继承剩余超时而非重新计时。
+After each batch completes, the Scheduler serializes the current state to JSON. On resume, it loads the checkpoint, skips completed batches, and continues from the next batch. `TimeoutContext` preserves elapsed time so resumption inherits remaining timeout rather than restarting the clock.
 
-### 8.4 模板引擎为何返回 Null 而非报错？
+### 8.4 Why Does the Template Engine Return Null Instead of Erroring?
 
-当路径不存在时（如 `inputs.missing_field`），模板引擎返回 `Value::Null` 而非报错。这使得 `default` 过滤器和 `||` 操作符可以优雅地处理缺失值——这是 Agent 友好的设计，避免因非关键字段缺失而中断整个工作流。
+When a path doesn't exist (e.g., `inputs.missing_field`), the template engine returns `Value::Null` instead of erroring. This allows `default` filters and `||` operators to gracefully handle missing values — an Agent-friendly design that avoids interrupting entire workflows due to non-critical field absence.
 
 ---
 
-## 9. 常见 YAML 模式速查
+## 9. Common YAML Pattern Reference
 
-### HTTP 请求 + 结果引用
+### HTTP Request + Result Reference
 ```yaml
 - id: fetch
   type: http
@@ -480,7 +482,7 @@ cargo test -- --nocapture  # 显示测试输出
   depends_on: [fetch]
 ```
 
-### 并行执行
+### Parallel Execution
 ```yaml
 - id: parallel_tasks
   type: parallel
@@ -497,7 +499,7 @@ cargo test -- --nocapture  # 显示测试输出
       api: https://api.example.com/2
 ```
 
-### 条件分支
+### Conditional Branching
 ```yaml
 - id: deploy
   type: condition
@@ -512,7 +514,7 @@ cargo test -- --nocapture  # 显示测试输出
       run: ./deploy-dev.sh
 ```
 
-### 循环
+### Loop
 ```yaml
 - id: process_items
   type: loop
@@ -526,7 +528,7 @@ cargo test -- --nocapture  # 显示测试输出
       run: echo "Processing ${{ variables.item.name }}"
 ```
 
-### 子工作流
+### Sub-workflow
 ```yaml
 - id: run_tests
   type: workflow
@@ -537,61 +539,61 @@ cargo test -- --nocapture  # 显示测试输出
   timeout: 120s
 ```
 
-### 人工审批
+### Manual Approval
 ```yaml
 - id: approve_deploy
   type: approve
-  message: "确认部署 ${{ inputs.version}} 到生产环境？"
+  message: "Confirm deployment of ${{ inputs.version}} to production?"
   approvers: [team-leads@company.com]
   timeout: 3600s
   auto_approve_on:
     - condition: "${{ inputs.environment == 'staging' }}"
-      reason: "staging 自动通过"
+      reason: "Staging auto-approved"
 
 
 
-## 代码详细解释
+## Code Detailed Explanation
 
-这段代码是 `DagScheduler::new` 方法中的一部分，用于**初始化 DAG（有向无环图）的数据结构**：
+This code is part of the `DagScheduler::new` method, used to **initialize the DAG (Directed Acyclic Graph) data structures**:
 
 ```rust
 for step_id in &step_ids {
-    adjacency.insert(step_id.clone(), Vec::new());  // 邻接表
-    in_degree.insert(step_id.clone(), 0);           // 入度表
+    adjacency.insert(step_id.clone(), Vec::new());  // Adjacency list
+    in_degree.insert(step_id.clone(), 0);           // In-degree table
 }
 ```
-# dag 详细分析
-## 两个核心数据结构
+# DAG Detailed Analysis
+## Two Core Data Structures
 
-### 1. `adjacency: HashMap<StepId, Vec<StepId>>` - 邻接表
+### 1. `adjacency: HashMap<StepId, Vec<StepId>>` - Adjacency List
 
 ```rust
 adjacency.insert(step_id.clone(), Vec::new());
 ```
 
-- **含义**：记录"从当前步骤可以到达哪些后续步骤"
-- **初始化**：每个步骤都初始化一个空的 `Vec`
-- **示例**：如果 `step1 -> step2`，则 `adjacency["step1"] = ["step2"]`
+- **Meaning**: Records "which subsequent steps can be reached from the current step"
+- **Initialization**: Each step is initialized with an empty `Vec`
+- **Example**: If `step1 -> step2`, then `adjacency["step1"] = ["step2"]`
 
-### 2. `in_degree: HashMap<StepId, usize>` - 入度表
+### 2. `in_degree: HashMap<StepId, usize>` - In-degree Table
 
 ```rust
 in_degree.insert(step_id.clone(), 0);
 ```
 
-- **含义**：记录"有多少个前置步骤依赖当前步骤"
-- **初始化**：每个步骤入度初始化为 `0`
-- **示例**：如果 `step1 -> step2`，则 `in_degree["step2"] = 1`
+- **Meaning**: Records "how many prerequisite steps depend on the current step"
+- **Initialization**: Each step's in-degree is initialized to `0`
+- **Example**: If `step1 -> step2`, then `in_degree["step2"] = 1`
 
-## 完整流程图解
+## Complete Flow Illustration
 
-假设有以下依赖关系：
+Assume the following dependency relationships:
 ```
 step1 → step2 → step4
     ↘ step3 ↗
 ```
 
-### 初始化后：
+### After Initialization:
 
 | step_id | adjacency | in_degree |
 |---------|-----------|-----------|
@@ -600,13 +602,13 @@ step1 → step2 → step4
 | step3 | `[]` | 0 |
 | step4 | `[]` | 0 |
 
-### 处理 `depends_on` 后：
+### After Processing `depends_on`:
 
 ```rust
 for step in &steps {
     if let Some(deps) = &step.depends_on {
         for dep in deps {
-            // dep -> step.id 的边
+            // dep -> step.id edge
             adjacency.entry(dep.clone()).or_default().push(step.id.clone());
             *in_degree.entry(step.id.clone()).or_insert(0) += 1;
         }
@@ -623,45 +625,45 @@ for step in &steps {
 
 
 
-## 为什么需要这两个数据结构？
+## Why Are These Two Data Structures Needed?
 
-这是**拓扑排序（Kahn 算法）**的核心：
+These are at the core of **topological sorting (Kahn's algorithm)**:
 
-1. **in_degree = 0** 的步骤没有前置依赖，可以立即执行
-2. 执行完一个步骤后，将其从 `adjacency` 中的邻居的 `in_degree` 减 1
-3. 当某个步骤的 `in_degree` 变为 0 时，加入执行队列
+1. Steps with **in_degree = 0** have no prerequisites and can execute immediately
+2. After executing a step, decrement the `in_degree` of its neighbors in `adjacency` by 1
+3. When a step's `in_degree` becomes 0, add it to the execution queue
 
 ```rust
-// topological_sort 中的使用
+// Usage in topological_sort
 for (step_id, &deg) in &in_degree {
     if deg == 0 {
-        queue.push_back(step_id.clone());  // 可以立即执行
+        queue.push_back(step_id.clone());  // Can execute immediately
     }
 }
 ```
 
-## 总结
+## Summary
 
-这段代码的目的是：
-1. **收集所有步骤 ID**
-2. **初始化邻接表和入度表**（每个步骤都是孤立的，入度为 0）
-3. 后续代码会根据 `depends_on` 填充这两个表，构建完整的依赖图
+The purpose of this code is to:
+1. **Collect all step IDs**
+2. **Initialize the adjacency list and in-degree table** (each step is isolated, in-degree = 0)
+3. Subsequent code populates these two tables based on `depends_on`, building the complete dependency graph
 
-这个解释 添加到注释
+This explanation is added as comments.
 ```
 
-是的，这里是**手动实现的拓扑排序**，使用的是经典的 **Kahn 算法**（BFS 版本）。
+Yes, this is a **manually implemented topological sort**, using the classic **Kahn's algorithm** (BFS version).
 
-## 算法流程
+## Algorithm Flow
 
 ```rust
 pub fn topological_sort(&self) -> Result<Vec<Vec<StepId>>, WorkflowError> {
-    // 1. 先检测循环依赖
+    // 1. First check for cycle dependencies
     if self.has_cycle()? {
         return Err(WorkflowError::CycleDetected);
     }
 
-    // 2. 初始化：复制入度表，找到所有入度为 0 的步骤
+    // 2. Initialize: copy in-degree table, find all steps with in-degree 0
     let mut in_degree = self.in_degree.clone();
     let mut queue: VecDeque<StepId> = VecDeque::new();
     let mut batches: Vec<Vec<StepId>> = Vec::new();
@@ -672,12 +674,12 @@ pub fn topological_sort(&self) -> Result<Vec<Vec<StepId>>, WorkflowError> {
         }
     }
 
-    // 3. 执行拓扑排序（Kahn 算法的核心循环）
+    // 3. Execute topological sort (Kahn's algorithm core loop)
     while !queue.is_empty() {
-        // 取出当前批次（所有入度为 0 的步骤可以并行执行）
+        // Take out current batch (all in-degree 0 steps can execute in parallel)
         let current_batch: Vec<StepId> = queue.drain(..).collect();
 
-        // 将当前批次的后续步骤入度减 1
+        // Decrement in-degree for subsequent steps of the current batch
         for step_id in &current_batch {
             if let Some(neighbors) = self.adjacency.get(step_id) {
                 for neighbor in neighbors {
@@ -698,78 +700,78 @@ pub fn topological_sort(&self) -> Result<Vec<Vec<StepId>>, WorkflowError> {
 }
 ```
 
-## 关键特性
+## Key Characteristics
 
-这个实现返回的是**分批次的拓扑排序** `Vec<Vec<StepId>>`，而不仅仅是一个扁平的序列：
+This implementation returns **batched topological sorting** `Vec<Vec<StepId>>`, not just a flat sequence:
 
-| 批次 | 包含步骤 | 说明 |
-|------|----------|------|
-| `batches[0]` | 入度为 0 的步骤 | 可以立即并行执行 |
-| `batches[1]` | 依赖第一批次完成的步骤 | |
+| Batch | Included Steps | Description |
+|-------|---------------|-------------|
+| `batches[0]` | Steps with in-degree 0 | Can execute in parallel immediately |
+| `batches[1]` | Steps depending on first batch completion | |
 | ... | ... | |
 
-## 示例
+## Example
 
 ```
 step1 → step2 → step4
     ↘ step3 ↗
 ```
 
-拓扑排序结果：`[["step1"], ["step2", "step3"], ["step4"]]`
+Topological sort result: `[["step1"], ["step2", "step3"], ["step4"]]`
 
-- 第一批：`step1`（无依赖，立即执行）
-- 第二批：`step2`, `step3`（并行执行，都依赖 `step1`）
-- 第三批：`step4`（依赖 `step2` 和 `step3`）
+- Batch 1: `step1` (no dependencies, execute immediately)
+- Batch 2: `step2`, `step3` (execute in parallel, both depend on `step1`)
+- Batch 3: `step4` (depends on `step2` and `step3`)
 
-## 为什么手动实现？
+## Why Manual Implementation?
 
-1. **分批执行**：需要支持并行执行同一层级的步骤
-2. **循环检测**：在排序前先检测循环依赖
-3. **与工作流引擎集成**：返回结果直接用于 `Scheduler::run()` 的批次执行
+1. **Batched execution**: Need to support parallel execution of steps at the same level
+2. **Cycle detection**: Check for cycle dependencies before sorting
+3. **Workflow engine integration**: Return result is directly used by `Scheduler::run()` for batch execution
 
 ---
 
-## 10. 步骤间结果传递机制详解
+## 10. Inter-Step Result Passing Mechanism in Detail
 
-这是 flow-run 最核心的运行时机制——前一个步骤的执行结果如何被后一个步骤引用。
+This is flow-run's most critical runtime mechanism — how one step's execution result is referenced by subsequent steps.
 
-### 10.1 整体数据流
+### 10.1 Overall Data Flow
 
 ```
-步骤 A 执行完毕
+Step A completes execution
        │
        ▼
 StepResult { step_id: "A", output: Some({...}), status, ... }
        │
-       ▼  Scheduler.run() 中，每个批次执行后写入
+       ▼  In Scheduler.run(), written after each batch executes
        │
 ExecutionContext.step_outputs["A"] = StepResult(...)
        │
-       ▼  步骤 B 执行前，构建模板上下文
+       ▼  Before Step B executes, build template context
        │
 template_ctx = {
     "inputs":   { "api_url": "https://..." },
-    "steps":    { "A": <StepResult.output 的值> },  ← 关键：只取 output 字段
+    "steps":    { "A": <StepResult.output value> },  ← Key: only the output field
     "variables": { ... }
 }
        │
-       ▼  TemplateEngine 解析 B 的 run/api 字段中的 ${{ steps.A.xxx }}
+       ▼  TemplateEngine parses ${{ steps.A.xxx }} in B's run/api field
        │
-${{ steps.A.response.body.title }}  →  沿 JSON 路径逐层取值
+${{ steps.A.response.body.title }}  →  Navigate JSON path layer by layer
        │
-步骤 B 拿到步骤 A 的输出数据
+Step B gets Step A's output data
 ```
 
-### 10.2 StepResult.output 的 JSON 结构
+### 10.2 StepResult.output JSON Structure
 
-不同步骤类型的 `output` 字段有不同结构：
+Different step types have different `output` field structures:
 
-**Shell 步骤** — stdout 原始输出：
+**Shell step** — raw stdout output:
 ```json
-{ "stdout": "目录已创建\n配置文件已写入\n" }
+{ "stdout": "Directory created\nConfiguration file written\n" }
 ```
 
-**HTTP 步骤** — 包装为 response 结构：
+**HTTP step** — wrapped in response structure:
 ```json
 {
   "response": {
@@ -779,7 +781,7 @@ ${{ steps.A.response.body.title }}  →  沿 JSON 路径逐层取值
 }
 ```
 
-**Parallel 步骤** — 子步骤 output 的数组：
+**Parallel step** — array of sub-step outputs:
 ```json
 {
   "results": [
@@ -790,7 +792,7 @@ ${{ steps.A.response.body.title }}  →  沿 JSON 路径逐层取值
 }
 ```
 
-**Workflow（子工作流）步骤** — 包含状态和输出：
+**Workflow (sub-workflow) step** — includes status and outputs:
 ```json
 {
   "workflow": "examples/sub.yaml",
@@ -800,9 +802,9 @@ ${{ steps.A.response.body.title }}  →  沿 JSON 路径逐层取值
 }
 ```
 
-### 10.3 写入：结果何时存入上下文
+### 10.3 Write: When Results Are Stored in Context
 
-在 `Scheduler::run()` 中（`src/core/dag.rs:215-218`），每个批次的所有步骤执行完毕后，立即写入共享上下文：
+In `Scheduler::run()` (`src/core/dag.rs:215-218`), after all steps in each batch complete, results are immediately written to the shared context:
 
 ```rust
 for result in &batch_results {
@@ -811,16 +813,16 @@ for result in &batch_results {
 }
 ```
 
-`step_outputs` 是 `HashMap<StepId, StepResult>`，key 是步骤 ID，value 是完整的 `StepResult`（包含 status、output、error、duration_ms 等）。
+`step_outputs` is `HashMap<StepId, StepResult>`, with step ID as the key and the complete `StepResult` (including status, output, error, duration_ms, etc.) as the value.
 
-**写入时机很重要**：同一批次内的并行步骤，后完成的会覆盖先完成的（通常不会冲突因为 ID 不同）。但不同批次之间是严格有序的——批次 N 的结果在批次 N+1 执行前已全部写入。
+**Write timing matters**: Within the same batch, parallel steps that complete later overwrite earlier ones (typically no conflict since IDs differ). But across batches, ordering is strict — batch N results are fully written before batch N+1 starts executing.
 
-### 10.4 读取：模板上下文如何构建
+### 10.4 Read: How Template Context Is Built
 
-当步骤 B 准备执行时（`execute_shell_step` 或 `execute_http_step`），会从 `ExecutionContext` 构建模板上下文（`src/core/dag.rs:490-503`）：
+When Step B is about to execute (`execute_shell_step` or `execute_http_step`), the template context is built from `ExecutionContext` (`src/core/dag.rs:490-503`):
 
 ```rust
-// 构建 steps 上下文：只包含 output 字段，便于模板直接访问
+// Build steps context: only include output field, for direct template access
 let mut steps_ctx = serde_json::Map::new();
 for (step_id, result) in &ctx.step_outputs {
     if let Some(output) = &result.output {
@@ -830,48 +832,48 @@ for (step_id, result) in &ctx.step_outputs {
 template_ctx.insert("steps".to_string(), serde_json::Value::Object(steps_ctx));
 ```
 
-关键设计：
-- 只取 `result.output`，不包含 `status`、`error`、`duration_ms` 等元数据
-- 如果步骤失败且 `output` 为 `None`，该步骤 ID 不会出现在模板上下文中
-- 模板上下文还包含 `inputs`（输入参数）和 `variables`（工作流变量 + 循环变量）
+Key design:
+- Only takes `result.output`, excluding `status`, `error`, `duration_ms`, and other metadata
+- If a step failed and `output` is `None`, that step ID won't appear in the template context
+- Template context also includes `inputs` (input parameters) and `variables` (workflow variables + loop variables)
 
-### 10.5 解析：`${{ steps.A.x.y }}` 如何解析
+### 10.5 Resolution: How `${{ steps.A.x.y }}` Is Parsed
 
-当步骤 B 的 `run` 字段包含 `${{ steps.fetch_data.response.body.title }}` 时：
+When Step B's `run` field contains `${{ steps.fetch_data.response.body.title }}`:
 
-1. **正则提取**：`TemplateEngine` 用 `\$\{\{([^}]+)\}\}` 提取内部表达式 `steps.fetch_data.response.body.title`
+1. **Regex extraction**: `TemplateEngine` uses `\$\{\{([^}]+)\}\}` to extract the inner expression `steps.fetch_data.response.body.title`
 
-2. **操作符检测**（优先级从高到低）：
-   - `||` 默认值操作符：`inputs.env || "staging"` → 如果左侧为 Null/空串，返回右侧
-   - `==` 相等比较：`inputs.risk_level == 'high'` → 返回 `true`/`false`
-   - `|` 过滤器链：`value | uppercase | truncate(10)` → 依次应用过滤器
+2. **Operator detection** (priority from high to low):
+   - `||` default value operator: `inputs.env || "staging"` → returns right side if left is Null/empty string
+   - `==` equality comparison: `inputs.risk_level == 'high'` → returns `true`/`false`
+   - `|` filter chain: `value | uppercase | truncate(10)` → applies filters sequentially
 
-3. **路径解析**：按 `.` 分割为 `["steps", "fetch_data", "response", "body", "title"]`
-   - `resolve_path()` 先从 context 取根键 `steps` → 得到 steps_ctx 对象
-   - `navigate_path()` 逐层导航：
-     - `steps_ctx["fetch_data"]` → HTTP 步骤的 output：`{"response": {"status_code": 200, "body": {...}}}`
+3. **Path resolution**: Split by `.` into `["steps", "fetch_data", "response", "body", "title"]`
+   - `resolve_path()` first gets root key `steps` from context → gets the steps_ctx object
+   - `navigate_path()` navigates layer by layer:
+     - `steps_ctx["fetch_data"]` → HTTP step's output: `{"response": {"status_code": 200, "body": {...}}}`
      - `["response"]` → `{"status_code": 200, "body": {...}}`
      - `["body"]` → `{"id": 1, "title": "..."}`
      - `["title"]` → `"..."`
 
-4. **数组索引**：`variables.items[0].name`
-   - `items[0]` 先按 `[` 分割，取字段 `items`（空串时直接取数组），再按数字索引取元素
+4. **Array index**: `variables.items[0].name`
+   - `items[0]` is split by `[`, taking field `items` (empty string means direct array access), then indexing by number
 
-5. **缺失路径返回 Null**：路径不存在时返回 `Value::Null`，而非报错。这使得 `||` 和 `default()` 过滤器可以优雅处理缺失值。
+5. **Missing paths return Null**: When a path doesn't exist, returns `Value::Null` instead of erroring. This allows `||` and `default()` filters to gracefully handle missing values.
 
-### 10.6 两套路径解析系统的差异
+### 10.6 Differences Between the Two Path Resolution Systems
 
-| 特性 | `TemplateEngine.resolve_path()` | `ExecutionContext.resolve_path()` |
+| Feature | `TemplateEngine.resolve_path()` | `ExecutionContext.resolve_path()` |
 |:---|:---|:---|
-| 所在文件 | `src/core/template.rs` | `src/core/context.rs` |
-| 路径不存在时 | 返回 `Value::Null`（友好） | 返回 `WorkflowError::PathNotFound`（报错） |
-| 使用场景 | 步骤执行器解析 `run`/`api` 模板 | `evaluate()` 方法、output 解析 |
-| 数组越界 | 返回 `Value::Null` | 返回 `PathNotFound` |
-| 支持过滤器 | 是 | 否 |
+| File location | `src/core/template.rs` | `src/core/context.rs` |
+| When path doesn't exist | Returns `Value::Null` (friendly) | Returns `WorkflowError::PathNotFound` (error) |
+| Use case | Step executors parsing `run`/`api` templates | `evaluate()` method, output parsing |
+| Array out of bounds | Returns `Value::Null` | Returns `PathNotFound` |
+| Filter support | Yes | No |
 
-### 10.7 特殊场景
+### 10.7 Special Cases
 
-**Parallel 步骤的子步骤间传递**：在 `execute_parallel_step()` 中（`src/core/dag.rs:550-553`），每个子步骤执行后**立即**写入上下文：
+**Passing between sub-steps of Parallel steps**: In `execute_parallel_step()` (`src/core/dag.rs:550-553`), each sub-step's result is **immediately** written to context after execution:
 
 ```rust
 {
@@ -880,9 +882,9 @@ template_ctx.insert("steps".to_string(), serde_json::Value::Object(steps_ctx));
 }
 ```
 
-这意味着并行组内的后续子步骤可以引用同组内先完成的子步骤输出。
+This means later sub-steps within a parallel group can reference outputs of earlier-completed sub-steps in the same group.
 
-**循环步骤的变量传递**：循环变量通过 `context.variables["loop"]` 传递，在构建模板上下文时会被提取到顶层：
+**Variable passing in Loop steps**: Loop variables are passed through `context.variables["loop"]`, and are extracted to the top level when building the template context:
 
 ```rust
 if let Some(loop_vars) = ctx.variables.get("loop") {
@@ -890,11 +892,11 @@ if let Some(loop_vars) = ctx.variables.get("loop") {
 }
 ```
 
-所以循环体内可以用 `${{ variables.loop.current }}` 或 `${{ loop.current }}` 访问当前迭代变量。
+So within a loop body, you can access the current iteration variable via `${{ variables.loop.current }}` or `${{ loop.current }}`.
 
-**子工作流的上下文隔离**：子工作流创建独立的 `ExecutionContext`，默认透传父工作流的 inputs（可通过 `passthrough_vars` 指定变量、`isolation: true` 完全隔离）。子工作流的输出以包装结构返回给父工作流。
+**Sub-workflow context isolation**: Sub-workflows create independent `ExecutionContext` instances, by default passing through the parent workflow's inputs (configurable via `passthrough_vars` for specific variables, or `isolation: true` for complete isolation). Sub-workflow outputs are returned to the parent workflow in a wrapped structure.
 
-### 10.8 完整示例：HTTP → Shell 结果传递
+### 10.8 Complete Example: HTTP → Shell Result Passing
 
 ```yaml
 steps:
@@ -907,10 +909,10 @@ steps:
   - id: display
     type: shell
     depends_on: [fetch]
-    # 模板解析链:
-    #   steps.fetch → 取 fetch 步骤的 output
+    # Template resolution chain:
+    #   steps.fetch → get fetch step's output
     #   .response → {"status_code": 200, "body": {...}}
     #   .body → {"name": "Alice", "email": "a@b.com"}
     #   .name → "Alice"
-    run: echo "用户名: ${{ steps.fetch.response.body.name }}"
+    run: echo "Username: ${{ steps.fetch.response.body.name }}"
 ```
