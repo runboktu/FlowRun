@@ -692,6 +692,42 @@ pub struct ExecutionMetrics {
     pub total_duration_ms: u64,
 }
 
+/// DAG 边（依赖关系）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DagEdge {
+    /// 源步骤 ID
+    pub from: StepId,
+    /// 目标步骤 ID
+    pub to: StepId,
+}
+
+/// 执行计划（dry-run 产出的结构化数据）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionPlan {
+    /// 工作流名称
+    pub workflow_name: String,
+    /// 工作流版本
+    pub workflow_version: Option<String>,
+    /// 工作流描述
+    pub workflow_description: Option<String>,
+    /// 步骤总数
+    pub step_count: usize,
+    /// 是否有循环依赖
+    pub has_cycle: bool,
+    /// 全局配置
+    pub config: Option<WorkflowConfig>,
+    /// 输入参数定义
+    pub inputs: Option<Vec<InputDefinition>>,
+    /// 实际传入的输入参数
+    pub provided_inputs: Vec<(String, String)>,
+    /// 输出定义
+    pub outputs: Option<HashMap<String, String>>,
+    /// 拓扑排序批次
+    pub batches: Vec<Vec<StepId>>,
+    /// DAG 边列表
+    pub dag_edges: Vec<DagEdge>,
+}
+
 /// 速率限制配置（步骤级）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StepRateLimitConfig {

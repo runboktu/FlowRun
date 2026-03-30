@@ -8,7 +8,14 @@
 //! - 模板表达式与过滤器链
 //! - 重试引擎与错误处理
 
+#[cfg(feature = "cli")]
 pub mod cli;
 pub mod core;
 pub mod executors;
 pub mod utils;
+
+// Re-export 核心类型，方便库用户直接 use flow_run::Xxx
+pub use core::parser::WorkflowParser;
+pub use core::runner::FlowRunner;
+pub use core::types::*;
+pub use utils::error::WorkflowError;
