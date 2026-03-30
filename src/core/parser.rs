@@ -374,6 +374,7 @@ steps:
             ],
             on: None,
             trigger: None,
+            variables: None,
         };
 
         let result = WorkflowParser::validate(&workflow);
