@@ -12,3 +12,4 @@ pub mod cli;
 pub mod core;
 pub mod executors;
 pub mod utils;
+pub mod agent;
