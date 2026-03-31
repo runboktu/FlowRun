@@ -671,6 +671,11 @@ mod tests {
                 condition: "${{ inputs.auto_approve }}".to_string(),
                 reason: "自动测试批准".to_string(),
             }]),
+            agent_system_prompt: None,
+            agent_input: None,
+            agent_max_iterations: None,
+            tool_name: None,
+            tool_args: None,
         };
 
         let result = executor.execute(&step, &context).await.unwrap();

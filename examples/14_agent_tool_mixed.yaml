@@ -1,0 +1,91 @@
+# Agent + Tool 混合示例
+#
+# 这个示例展示 Agent 和 Tool 步骤的混合使用：
+# - 全局工具定义（注册到 ToolRegistry）
+# - ToolExecutor 直接调用工具
+# - AgentExecutor 使用工具进行推理
+# - Agent 和 Tool 共享相同的工具
+
+name: "Agent + Tool 混合工作流"
+description: "演示 Agent 和 Tool 步骤的混合使用，共享工具注册表"
+version: "1.0.0"
+
+inputs:
+  - name: file_path
+    type: string
+    required: true
+    description: "要分析的文件路径"
+
+  - name: openai_api_key
+    type: string
+    required: true
+    description: "OpenAI API Key"
+
+# 全局工具定义（注册到 ToolRegistry）
+tools:
+  - name: read_file
+    description: "读取文件内容"
+    json_schema: |
+      {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"}
+        }
+      }
+    source: builtin
+
+  - name: write_file
+    description: "写入文件"
+    json_schema: |
+      {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"},
+          "content": {"type": "string"}
+        }
+      }
+    source: builtin
+
+steps:
+  # 步骤 1: ToolExecutor 直接调用 read_file 工具
+  - id: read_config
+    name: "读取配置文件"
+    type: tool
+    tool_name: read_file
+    tool_args: '{"path": "${{ inputs.file_path }}"}'
+
+  # 步骤 2: Agent 使用所有已注册的工具进行分析
+  - id: analyze_file
+    name: "AI 分析文件"
+    type: agent
+    agent_input: |
+      请分析以下文件内容，并提供改进建议：
+      
+      文件内容：
+      ${{ steps.read_config.output }}
+
+    agent_system_prompt: |
+      你是一个代码审查专家。请分析用户提供的文件内容，并给出改进建议。
+      如果需要读取其他文件来了解上下文，可以使用 read_file 工具。
+      如果需要将分析结果写入文件，可以使用 write_file 工具。
+    agent_max_iterations: 5
+    depends_on:
+      - read_config
+
+  # 步骤 3: ToolExecutor 直接调用 write_file 工具保存结果
+  - id: save_report
+    name: "保存分析报告"
+    type: tool
+    tool_name: write_file
+    tool_args: |
+      {
+        "path": "/tmp/analysis_report.txt",
+        "content": "${{ steps.analyze_file.output.answer }}"
+      }
+    depends_on:
+      - analyze_file
+
+outputs:
+  file_content: "${{ steps.read_config.output }}"
+  analysis: "${{ steps.analyze_file.output.answer }}"
+  report_path: "/tmp/analysis_report.txt"

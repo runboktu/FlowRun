@@ -8,6 +8,8 @@ pub mod r#loop;
 pub mod condition;
 pub mod workflow;
 pub mod approve;
+pub mod agent_executor;
+pub mod tool_executor;
 
 /// Executor trait 的定义
 ///
