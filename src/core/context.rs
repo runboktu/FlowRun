@@ -487,6 +487,7 @@ mod tests {
             on: None,
             trigger: None,
             variables: None,
+            variables: None,
         };
 
         let inputs = HashMap::new();
@@ -512,6 +513,7 @@ mod tests {
             steps: vec![],
             on: None,
             trigger: None,
+            variables: None,
             variables: None,
         };
 
@@ -567,6 +569,7 @@ mod tests {
             on: None,
             trigger: None,
             variables: None,
+            variables: None,
         };
 
         let mut context = ExecutionContext::new(&workflow, HashMap::new());
@@ -616,6 +619,7 @@ mod tests {
             steps: vec![],
             on: None,
             trigger: None,
+            variables: None,
             variables: None,
         };
 
