@@ -13,6 +13,58 @@ use flow_run::utils::checkpoint::CheckpointManager;
 use std::collections::HashMap;
 use std::path::Path;
 use tempfile::tempdir;
+use flow_run::FlowRunner;
+
+// FlowRunner 版本
+// #[tokio::main]
+// async fn main() -> anyhow::Result<()> {
+//     tracing_subscriber::fmt()
+//         .with_env_filter("flow_run=info")
+//         .init();
+//
+//     println!("==========================================");
+//     println!("  flow-run - 基础示例：加载并执行工作流");
+//     println!("==========================================\n");
+//
+//     // 1. 创建 FlowRunner（从文件加载）
+//     println!("[1] 从文件创建工作流运行器");
+//     let runner = FlowRunner::from_file("examples/01_basic_http.yaml")?;
+//     println!("    ✅ 加载成功!\n");
+//
+//     // 2. 显示工作流信息
+//     println!("[2] 工作流信息:");
+//     println!("    名称: {}", runner.workflow().name);
+//     println!("    步骤数: {}\n", runner.workflow().steps.len());
+//
+//     // 3. 创建输入参数
+//     let api_url = "https://jsonplaceholder.typicode.com";
+//     println!("[3] 输入参数:");
+//     println!("    api_url: {}\n", api_url);
+//
+//     let mut inputs = HashMap::new();
+//     inputs.insert("api_url".to_string(), serde_json::json!(api_url));
+//
+//     // 4. 执行工作流（一行搞定！）
+//     println!("[4] 执行工作流...");
+//     println!("    -> GET {}/users/1\n", api_url);
+//     let result = runner.run(inputs).await?;
+//
+//     // 5. 显示执行结果
+//     println!("[5] 执行结果:");
+//     println!("    状态: {:?}", result.status);
+//     println!("    步骤结果:");
+//     for step in &result.steps {
+//         println!("      - {}: {:?} {:?}", step.step_id, step.status, step.output);
+//     }
+//     println!();
+//
+//     println!("==========================================");
+//     println!("  示例完成!");
+//     println!("==========================================");
+//
+//     Ok(())
+// }
+
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
