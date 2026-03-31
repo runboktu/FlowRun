@@ -283,6 +283,67 @@ pub struct StepDefinition {
     pub on_timeout: Option<ApprovalTimeoutStrategy>,
     /// 自动审批条件
     pub auto_approve_on: Option<Vec<AutoApproveRule>>,
+
+    // Agent 步骤特有字段
+    /// Agent 系统提示词
+    pub agent_system_prompt: Option<String>,
+    /// Agent 输入（模板表达式）
+    pub agent_input: Option<String>,
+    /// Agent 最大迭代次数
+    pub agent_max_iterations: Option<u32>,
+
+    // Tool 步骤特有字段
+    /// 工具名称
+    pub tool_name: Option<String>,
+    /// 工具参数（JSON 字符串或模板表达式）
+    pub tool_args: Option<String>,
+}
+
+impl Default for StepDefinition {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: None,
+            r#type: StepType::Http,
+            depends_on: None,
+            expect: None,
+            retry: None,
+            timeout: None,
+            hooks: None,
+            api: None,
+            method: None,
+            headers: None,
+            body: None,
+            cache: None,
+            run: None,
+            env: None,
+            safe_mode: None,
+            allowed_commands: None,
+            steps: None,
+            max_concurrent: None,
+            rate_limit: None,
+            r#loop: None,
+            do_steps: None,
+            expression: None,
+            then_steps: None,
+            else_steps: None,
+            workflow: None,
+            inputs: None,
+            error_strategy: None,
+            isolation: None,
+            passthrough_vars: None,
+            message: None,
+            approvers: None,
+            require_comment: None,
+            on_timeout: None,
+            auto_approve_on: None,
+            agent_system_prompt: None,
+            agent_input: None,
+            agent_max_iterations: None,
+            tool_name: None,
+            tool_args: None,
+        }
+    }
 }
 
 /// 步骤类型枚举
@@ -303,6 +364,10 @@ pub enum StepType {
     Workflow,
     /// 人工审批
     Approve,
+    /// Agent 推理步骤
+    Agent,
+    /// 工具调用步骤
+    Tool,
 }
 
 /// 安全模式

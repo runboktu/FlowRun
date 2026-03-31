@@ -1,0 +1,40 @@
+# Agent 模块示例 - 使用工具的 AI Agent
+#
+# 这个示例展示 Agent 步骤的使用：
+# - 注册自定义工具
+# - 使用 Agent 进行推理和工具调用
+# - Agent 自动使用已注册的工具
+
+name: "AI Agent 工具调用示例"
+description: "演示如何使用 Agent 步骤进行智能推理和工具调用"
+version: "1.0.0"
+
+inputs:
+  - name: question
+    type: string
+    required: true
+    description: "要询问 Agent 的问题"
+
+  - name: openai_api_key
+    type: string
+    required: true
+    description: "OpenAI API Key"
+
+steps:
+  # 使用 Agent 进行推理
+  - id: ai_reasoning
+    name: "AI 推理"
+    type: agent
+    agent_input: "${{ inputs.question }}"
+    agent_system_prompt: |
+      你是一个有用的助手。请仔细思考用户的问题，并使用可用的工具来获取信息。
+      如果需要计算，请使用 calculator 工具。
+      如果需要查询天气，请使用 weather 工具。
+    agent_max_iterations: 5
+    llm_provider:
+      type: openai
+      model: gpt-4
+      api_key: "${{ inputs.openai_api_key }}"
+
+outputs:
+  answer: "${{ steps.ai_reasoning.output.answer }}"
