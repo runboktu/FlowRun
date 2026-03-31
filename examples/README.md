@@ -18,7 +18,10 @@ examples/
 ├── 09_advanced_subworkflow.yaml       # 高级 - 子工作流
 ├── 10_advanced_approval.yaml          # 高级 - 人工审批
 ├── 11_comprehensive_cicd.yaml         # 综合 - CI/CD 流水线
-└── 12_checkpoint_resume.yaml          # 综合 - 检查点保存与恢复
+├── 12_checkpoint_resume.yaml          # 综合 - 检查点保存与恢复
+├── 13_agent_basic.yaml                # Agent - 基础 Agent 使用
+├── 14_agent_tool_mixed.yaml           # Agent - Agent + Tool 混合使用
+└── 15_tool_only.yaml                  # Tool - 纯 Tool 步骤工作流
 ```
 
 ## 使用方法
@@ -77,6 +80,14 @@ flow-run examples/03_basic_dependencies.yaml run \
 | 示例 | 说明 | 关键功能 |
 |:---|:---|:---|
 | `11_comprehensive_cicd.yaml` | 完整 CI/CD 流水线 | 综合使用所有功能 |
+
+### Agent & Tool 示例
+
+| 示例 | 说明 | 关键功能 |
+|:---|:---|:---|
+| `13_agent_basic.yaml` | 基础 Agent 使用 | agent 类型、系统提示、最大迭代次数 |
+| `14_agent_tool_mixed.yaml` | Agent + Tool 混合使用 | 工具定义、Agent 和 Tool 共享工具 |
+| `15_tool_only.yaml` | 纯 Tool 步骤工作流 | tool 类型、工具调用、数据传递 |
 
 ## 模板表达式语法
 
@@ -150,6 +161,8 @@ config:
 | `condition` | 条件分支 | expression, then_steps, else_steps |
 | `workflow` | 子工作流 | workflow, inputs, error_strategy |
 | `approve` | 人工审批 | message, approvers, auto_approve_on |
+| `agent` | AI Agent 推理 | agent_input, agent_system_prompt, agent_max_iterations |
+| `tool` | 工具调用 | tool_name, tool_args |
 
 ## Rust 代码示例
 

@@ -406,6 +406,22 @@ fn dry_run_workflow(
                     println!("    审批人: {:?}", approvers);
                 }
             }
+            flow_run::core::types::StepType::Agent => {
+                if let Some(input) = &step.agent_input {
+                    println!("    Agent 输入: {}", input);
+                }
+                if let Some(max_iter) = &step.agent_max_iterations {
+                    println!("    最大迭代次数: {}", max_iter);
+                }
+            }
+            flow_run::core::types::StepType::Tool => {
+                if let Some(tool_name) = &step.tool_name {
+                    println!("    工具: {}", tool_name);
+                }
+                if let Some(args) = &step.tool_args {
+                    println!("    参数: {}", args);
+                }
+            }
         }
     }
 

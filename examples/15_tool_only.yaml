@@ -1,0 +1,97 @@
+# 纯 Tool 步骤示例
+#
+# 这个示例展示如何只使用 Tool 步骤（不使用 Agent）：
+# - 全局工具定义
+# - ToolExecutor 直接调用工具
+# - 步骤间的数据传递
+
+name: "纯 Tool 步骤工作流"
+description: "演示如何只使用 Tool 步骤构建工作流"
+version: "1.0.0"
+
+inputs:
+  - name: source_url
+    type: string
+    required: true
+    description: "数据源 URL"
+
+  - name: output_path
+    type: string
+    required: true
+    description: "输出文件路径"
+
+# 全局工具定义
+tools:
+  - name: http_get
+    description: "发送 HTTP GET 请求"
+    json_schema: |
+      {
+        "type": "object",
+        "properties": {
+          "url": {"type": "string"}
+        }
+      }
+    source: builtin
+
+  - name: json_transform
+    description: "转换 JSON 数据"
+    json_schema: |
+      {
+        "type": "object",
+        "properties": {
+          "data": {"type": "object"},
+          "transform": {"type": "string"}
+        }
+      }
+    source: builtin
+
+  - name: write_file
+    description: "写入文件"
+    json_schema: |
+      {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"},
+          "content": {"type": "string"}
+        }
+      }
+    source: builtin
+
+steps:
+  # 步骤 1: 获取数据
+  - id: fetch_data
+    name: "获取数据"
+    type: tool
+    tool_name: http_get
+    tool_args: '{"url": "${{ inputs.source_url }}"}'
+
+  # 步骤 2: 转换数据
+  - id: transform_data
+    name: "转换数据"
+    type: tool
+    tool_name: json_transform
+    tool_args: |
+      {
+        "data": ${{ steps.fetch_data.output }},
+        "transform": "extract_fields"
+      }
+    depends_on:
+      - fetch_data
+
+  # 步骤 3: 保存结果
+  - id: save_result
+    name: "保存结果"
+    type: tool
+    tool_name: write_file
+    tool_args: |
+      {
+        "path": "${{ inputs.output_path }}",
+        "content": "${{ steps.transform_data.output | to_json }}"
+      }
+    depends_on:
+      - transform_data
+
+outputs:
+  raw_data: "${{ steps.fetch_data.output }}"
+  transformed_data: "${{ steps.transform_data.output }}"
+  saved_path: "${{ inputs.output_path }}"
