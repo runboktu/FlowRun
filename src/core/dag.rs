@@ -2,6 +2,9 @@ use crate::core::context::ExecutionContext;
 use crate::core::types::*;
 use crate::executors::workflow::{WorkflowExecutor, WorkflowRunner};
 use crate::executors::approve::ApproveExecutor;
+use crate::executors::agent_executor::AgentExecutor;
+use crate::executors::tool_executor::ToolExecutor;
+use crate::executors::Executor;
 use crate::utils::checkpoint::CheckpointManager;
 use crate::utils::error::WorkflowError;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
@@ -148,6 +151,8 @@ pub struct Scheduler {
     checkpoint_manager: CheckpointManager,
     workflow_executor: Arc<WorkflowExecutor>,
     approve_executor: Arc<ApproveExecutor>,
+    agent_executor: Arc<AgentExecutor>,
+    tool_executor: Arc<ToolExecutor>,
     workflow_outputs: Arc<RwLock<Option<HashMap<String, String>>>>,
 }
 
@@ -157,6 +162,9 @@ impl Scheduler {
         config: WorkflowConfig,
         checkpoint_manager: CheckpointManager,
     ) -> Self {
+        let tool_registry = Arc::new(crate::agent::ToolRegistry::new());
+        let agent_manager = Arc::new(crate::agent::AgentManager::new(tool_registry.clone()));
+        
         Self {
             dag,
             context: Arc::new(RwLock::new(ExecutionContext::empty())),
@@ -164,6 +172,8 @@ impl Scheduler {
             checkpoint_manager,
             workflow_executor: Arc::new(WorkflowExecutor::new(Arc::new(NullWorkflowRunner))),
             approve_executor: Arc::new(ApproveExecutor::new()),
+            agent_executor: Arc::new(AgentExecutor::new(agent_manager)),
+            tool_executor: Arc::new(ToolExecutor::new(tool_registry)),
             workflow_outputs: Arc::new(RwLock::new(None)),
         }
     }
@@ -189,6 +199,9 @@ impl Scheduler {
         checkpoint_manager: CheckpointManager,
         workflow_executor: Arc<WorkflowExecutor>,
     ) -> Self {
+        let tool_registry = Arc::new(crate::agent::ToolRegistry::new());
+        let agent_manager = Arc::new(crate::agent::AgentManager::new(tool_registry.clone()));
+        
         Self {
             dag,
             context: Arc::new(RwLock::new(ExecutionContext::empty())),
@@ -196,6 +209,8 @@ impl Scheduler {
             checkpoint_manager,
             workflow_executor,
             approve_executor: Arc::new(ApproveExecutor::new()),
+            agent_executor: Arc::new(AgentExecutor::new(agent_manager)),
+            tool_executor: Arc::new(ToolExecutor::new(tool_registry)),
             workflow_outputs: Arc::new(RwLock::new(None)),
         }
     }
@@ -292,10 +307,12 @@ impl Scheduler {
                 let context = Arc::clone(&self.context);
                 let workflow_executor = Arc::clone(&self.workflow_executor);
                 let approve_executor = Arc::clone(&self.approve_executor);
+                let agent_executor = Arc::clone(&self.agent_executor);
+                let tool_executor = Arc::clone(&self.tool_executor);
 
                 let task = tokio::spawn(async move {
                     let _permit = semaphore.acquire().await.unwrap();
-                    Self::execute_step(&step_def, &context, workflow_executor, approve_executor).await
+                    Self::execute_step(&step_def, &context, workflow_executor, approve_executor, agent_executor, tool_executor).await
                 });
 
                 tasks.push(task);
@@ -319,6 +336,8 @@ impl Scheduler {
         context: &'a Arc<RwLock<ExecutionContext>>,
         workflow_executor: Arc<WorkflowExecutor>,
         approve_executor: Arc<ApproveExecutor>,
+        agent_executor: Arc<crate::executors::agent_executor::AgentExecutor>,
+        tool_executor: Arc<crate::executors::tool_executor::ToolExecutor>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<StepResult, WorkflowError>> + Send + 'a>> {
         Box::pin(async move {
             let start_time = Utc::now();
@@ -331,19 +350,27 @@ impl Scheduler {
                     Self::execute_shell_step(step_def, context).await
                 }
                 StepType::Parallel => {
-                    Self::execute_parallel_step(step_def, context, workflow_executor.clone(), approve_executor.clone()).await
+                    Self::execute_parallel_step(step_def, context, workflow_executor.clone(), approve_executor.clone(), agent_executor.clone(), tool_executor.clone()).await
                 }
                 StepType::Loop => {
-                    Self::execute_loop_step(step_def, context, workflow_executor.clone(), approve_executor.clone()).await
+                    Self::execute_loop_step(step_def, context, workflow_executor.clone(), approve_executor.clone(), agent_executor.clone(), tool_executor.clone()).await
                 }
                 StepType::Condition => {
-                    Self::execute_condition_step(step_def, context, workflow_executor.clone(), approve_executor.clone()).await
+                    Self::execute_condition_step(step_def, context, workflow_executor.clone(), approve_executor.clone(), agent_executor.clone(), tool_executor.clone()).await
                 }
                 StepType::Workflow => {
                     Self::execute_workflow_step(step_def, context, workflow_executor).await
                 }
                 StepType::Approve => {
                     Self::execute_approve_step(step_def, context, approve_executor).await
+                }
+                StepType::Agent => {
+                    let ctx = context.read().await;
+                    agent_executor.execute(step_def, &ctx).await
+                }
+                StepType::Tool => {
+                    let ctx = context.read().await;
+                    tool_executor.execute(step_def, &ctx).await
                 }
             };
 
@@ -537,6 +564,8 @@ impl Scheduler {
         context: &Arc<RwLock<ExecutionContext>>,
         workflow_executor: Arc<WorkflowExecutor>,
         approve_executor: Arc<ApproveExecutor>,
+        agent_executor: Arc<AgentExecutor>,
+        tool_executor: Arc<ToolExecutor>,
     ) -> Result<StepResult, WorkflowError> {
         let steps = step_def.steps.as_ref().ok_or_else(|| {
             WorkflowError::Other(format!("步骤 {} 缺少子步骤", step_def.id))
@@ -544,7 +573,7 @@ impl Scheduler {
 
         let mut results = Vec::new();
         for sub_step in steps {
-            let result = Self::execute_step(sub_step, context, workflow_executor.clone(), approve_executor.clone()).await?;
+            let result = Self::execute_step(sub_step, context, workflow_executor.clone(), approve_executor.clone(), agent_executor.clone(), tool_executor.clone()).await?;
 
             // 将子步骤结果存储到上下文中，便于后续模板引用
             {
@@ -567,6 +596,8 @@ impl Scheduler {
         context: &Arc<RwLock<ExecutionContext>>,
         workflow_executor: Arc<WorkflowExecutor>,
         approve_executor: Arc<ApproveExecutor>,
+        agent_executor: Arc<AgentExecutor>,
+        tool_executor: Arc<ToolExecutor>,
     ) -> Result<StepResult, WorkflowError> {
         let loop_config = step_def.r#loop.as_ref().ok_or_else(|| {
             WorkflowError::Other(format!("步骤 {} 缺少循环配置", step_def.id))
@@ -612,6 +643,8 @@ impl Scheduler {
                             context,
                             workflow_executor.clone(),
                             approve_executor.clone(),
+                            agent_executor.clone(),
+                            tool_executor.clone(),
                         ).await?;
                         all_results.push(result);
                     }
@@ -643,6 +676,8 @@ impl Scheduler {
                             context,
                             workflow_executor.clone(),
                             approve_executor.clone(),
+                            agent_executor.clone(),
+                            tool_executor.clone(),
                         ).await?;
                         all_results.push(result);
                     }
@@ -698,6 +733,8 @@ impl Scheduler {
                             context,
                             workflow_executor.clone(),
                             approve_executor.clone(),
+                            agent_executor.clone(),
+                            tool_executor.clone(),
                         ).await?;
                         all_results.push(result);
                     }
@@ -748,6 +785,8 @@ impl Scheduler {
         context: &Arc<RwLock<ExecutionContext>>,
         workflow_executor: Arc<WorkflowExecutor>,
         approve_executor: Arc<ApproveExecutor>,
+        agent_executor: Arc<AgentExecutor>,
+        tool_executor: Arc<ToolExecutor>,
     ) -> Result<StepResult, WorkflowError> {
         let expression = step_def.expression.as_ref().ok_or_else(|| {
             WorkflowError::Other(format!("步骤 {} 缺少条件表达式", step_def.id))
@@ -787,6 +826,8 @@ impl Scheduler {
                 context,
                 workflow_executor.clone(),
                 approve_executor.clone(),
+                agent_executor.clone(),
+                tool_executor.clone(),
             ).await?;
             results.push(result);
         }
@@ -1073,7 +1114,12 @@ mod tests {
                 require_comment: None,
                 on_timeout: None,
                 auto_approve_on: None,
-            },
+                    agent_system_prompt: None,
+                    agent_input: None,
+                    agent_max_iterations: None,
+                    tool_name: None,
+                    tool_args: None,
+                },
             StepDefinition {
                 id: "step2".to_string(),
                 name: None,
@@ -1110,7 +1156,12 @@ mod tests {
                 require_comment: None,
                 on_timeout: None,
                 auto_approve_on: None,
-            },
+                    agent_system_prompt: None,
+                    agent_input: None,
+                    agent_max_iterations: None,
+                    tool_name: None,
+                    tool_args: None,
+                },
         ];
 
         let scheduler = DagScheduler::new(steps).unwrap();
@@ -1160,7 +1211,12 @@ mod tests {
                 require_comment: None,
                 on_timeout: None,
                 auto_approve_on: None,
-            },
+                    agent_system_prompt: None,
+                    agent_input: None,
+                    agent_max_iterations: None,
+                    tool_name: None,
+                    tool_args: None,
+                },
             StepDefinition {
                 id: "step2".to_string(),
                 name: None,
@@ -1197,7 +1253,12 @@ mod tests {
                 require_comment: None,
                 on_timeout: None,
                 auto_approve_on: None,
-            },
+                    agent_system_prompt: None,
+                    agent_input: None,
+                    agent_max_iterations: None,
+                    tool_name: None,
+                    tool_args: None,
+                },
         ];
 
         let scheduler = DagScheduler::new(steps).unwrap();

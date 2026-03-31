@@ -159,7 +159,7 @@ fn handle_checkpoint_action(action: CheckpointAction) {
                     println!("清理超过 {} 天的检查点", days);
                 }
                 CleanStrategy::Status { status } => {
-                    println!("清理状态为 {} 的检查点", status);
+                    println!("按状态清理: {:?}", status);
                 }
                 CleanStrategy::Keep { count } => {
                     println!("保留最近 {} 个检查点", count);
