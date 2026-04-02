@@ -14,13 +14,14 @@ pub mod react_agent;
 pub use types::{
     AgentStatus, Message, MessageRole, LlmResponse, ToolResult,
     ToolDescriptor, ToolHandler, AgentCallback, ParserType, ParsedResponse,
+    LlmChunk, TokenUsage, LlmStream,
     PROGRESS_TYPE_ITERATION_START, PROGRESS_TYPE_LLM_CALL,
     PROGRESS_TYPE_LLM_RESPONSE, PROGRESS_TYPE_TOOL_CALL,
     PROGRESS_TYPE_TOOL_RESULT, PROGRESS_TYPE_FINAL_ANSWER,
     PROGRESS_TYPE_ERROR,
 };
 pub use error::AgentError;
-pub use llm_adapter::LlmProvider;
+pub use llm_adapter::{LlmProvider, LlmProviderConfig, create_llm_provider, DeepSeekProvider, OpenAiCompatibleProvider};
 pub use tool_registry::ToolRegistry;
 pub use response_parser::{ResponseParser, XmlResponseParser, JsonResponseParser, create_parser};
 pub use react_agent::{ReActAgent, AgentManager};

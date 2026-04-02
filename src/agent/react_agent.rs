@@ -9,7 +9,7 @@ use uuid::Uuid;
 use tracing::info;
 
 use crate::agent::types::{
-    Message, MessageRole, AgentStatus, AgentCallback, 
+    Message, AgentStatus, AgentCallback, 
     ToolDescriptor, ParserType,
 };
 use crate::agent::error::AgentError;
@@ -17,6 +17,7 @@ use crate::agent::llm_adapter::LlmProvider;
 use crate::agent::tool_registry::ToolRegistry;
 use crate::agent::response_parser::{ResponseParser, create_parser};
 use crate::agent::system_prompt::{render_system_prompt, DEFAULT_SYSTEM_PROMPT};
+use tokio_stream::StreamExt;
 
 /// ReAct Agent
 pub struct ReActAgent {
@@ -93,6 +94,15 @@ impl ReActAgent {
         callback: AgentCallback,
     ) -> Result<String, AgentError> {
         self.run_internal_with_progress(user_input, callback).await
+    }
+
+    /// 流式运行 Agent
+    pub async fn run_stream(
+        &mut self,
+        user_input: &str,
+        callback: AgentCallback,
+    ) -> Result<String, AgentError> {
+        self.run_internal_stream(user_input, callback).await
     }
 
     async fn run_internal(&mut self, user_input: &str) -> Result<String, AgentError> {
@@ -240,6 +250,123 @@ impl ReActAgent {
         );
         Err(AgentError::MaxIterationsReached)
     }
+
+    async fn run_internal_stream(
+        &mut self,
+        user_input: &str,
+        callback: AgentCallback,
+    ) -> Result<String, AgentError> {
+        self.messages.clear();
+
+        let system_prompt = self.render_system_prompt().await;
+        self.messages.push(Message::system(system_prompt));
+        self.messages.push(Message::user(format!("<question>{}</question>", user_input)));
+
+        callback(
+            serde_json::json!({"type": "iteration_start"}).to_string(),
+            AgentStatus::IterationStart,
+        );
+
+        let mut iteration_count = 0;
+        while iteration_count < self.max_iterations {
+            iteration_count += 1;
+
+            callback(
+                serde_json::json!({"type": "llm_call", "iteration": iteration_count}).to_string(),
+                AgentStatus::LlmCall,
+            );
+
+            let messages = self.messages.clone();
+            let mut stream = self.llm_provider.call_stream(messages);
+            let mut accumulator = String::new();
+
+            while let Some(chunk_result) = stream.next().await {
+                let chunk = chunk_result?;
+                accumulator.push_str(&chunk.delta);
+
+                callback(
+                    serde_json::json!({
+                        "type": "llm_chunk",
+                        "delta": chunk.delta,
+                        "accumulated_length": accumulator.len(),
+                        "iteration": iteration_count,
+                    }).to_string(),
+                    AgentStatus::LlmChunk,
+                );
+
+                if chunk.done {
+                    if let Some(usage) = chunk.usage {
+                        callback(
+                            serde_json::json!({
+                                "type": "token_usage",
+                                "prompt_tokens": usage.prompt_tokens,
+                                "completion_tokens": usage.completion_tokens,
+                                "total_tokens": usage.total_tokens,
+                            }).to_string(),
+                            AgentStatus::LlmResponse,
+                        );
+                    }
+                    break;
+                }
+            }
+
+            self.messages.push(Message::assistant(accumulator.clone()));
+            let parsed = self.parser.parse(&accumulator);
+
+            if let Some(final_answer) = &parsed.final_answer {
+                callback(
+                    serde_json::json!({"type": "final_answer", "content": final_answer}).to_string(),
+                    AgentStatus::IterationEnd,
+                );
+                return Ok(final_answer.clone());
+            }
+
+            if let Some(action) = &parsed.action {
+                let (tool_name, args_str) = self.parser.parse_action(action);
+
+                callback(
+                    serde_json::json!({
+                        "type": "tool_call",
+                        "tool_name": tool_name,
+                        "args": args_str,
+                        "iteration": iteration_count,
+                    }).to_string(),
+                    AgentStatus::ToolCall,
+                );
+
+                if !self.tool_registry.has_tool(&tool_name).await {
+                    let error_msg = format!("Tool '{}' not found", tool_name);
+                    callback(
+                        serde_json::json!({"type": "error", "content": error_msg}).to_string(),
+                        AgentStatus::Retry,
+                    );
+                    self.messages.push(Message::user(format!("<observation>{}</observation>", error_msg)));
+                    continue;
+                }
+
+                let result = self.tool_registry.execute(&tool_name, &args_str).await;
+
+                callback(
+                    serde_json::json!({
+                        "type": "tool_result",
+                        "content": result.content,
+                        "is_error": result.is_error,
+                    }).to_string(),
+                    AgentStatus::ToolResult,
+                );
+
+                self.messages.push(Message::user(format!("<observation>{}</observation>", result.content)));
+            } else {
+                return Ok(accumulator);
+            }
+        }
+
+        callback(
+            serde_json::json!({"type": "error", "content": "Max iterations reached"}).to_string(),
+            AgentStatus::IterationEnd,
+        );
+        Err(AgentError::MaxIterationsReached)
+    }
 }
 
 /// 会话管理器
@@ -283,6 +410,28 @@ impl AgentManager {
         Ok(session_id)
     }
 
+    pub async fn create_session_with_llm(
+        &self,
+        llm: Arc<dyn LlmProvider>,
+        user_prompt: Option<&str>,
+    ) -> Result<String, AgentError> {
+        let session_id = Uuid::new_v4().to_string();
+
+        let mut agent = ReActAgent::new(
+            session_id.clone(),
+            self.tool_registry.clone(),
+            llm,
+        );
+
+        if let Some(prompt) = user_prompt {
+            agent.set_user_prompt(prompt);
+        }
+
+        info!("[AgentManager] Created session: {}", session_id);
+        self.sessions.write().await.insert(session_id.clone(), agent);
+        Ok(session_id)
+    }
+
     pub async fn destroy_session(&self, session_id: &str) -> bool {
         let removed = self.sessions.write().await.remove(session_id).is_some();
         if removed {
@@ -310,6 +459,18 @@ impl AgentManager {
         } else {
             agent.run(user_input).await
         }
+    }
+
+    pub async fn run_sync_stream(
+        &self,
+        session_id: &str,
+        user_input: &str,
+        callback: AgentCallback,
+    ) -> Result<String, AgentError> {
+        let mut sessions = self.sessions.write().await;
+        let agent = sessions.get_mut(session_id)
+            .ok_or_else(|| AgentError::SessionNotFound(session_id.to_string()))?;
+        agent.run_stream(user_input, callback).await
     }
 
     pub async fn set_max_iterations(&self, session_id: &str, max: u32) -> Result<(), AgentError> {
