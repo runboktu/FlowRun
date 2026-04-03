@@ -1,13 +1,14 @@
 //! Agent 步骤执行器
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use chrono::Utc;
 
 use crate::core::context::ExecutionContext;
 use crate::core::types::*;
 use crate::executors::Executor;
 use crate::utils::error::WorkflowError;
-use crate::agent::{AgentManager, LlmProviderConfig, create_llm_provider};
+use crate::agent::{AgentManager, AgentCallback, AgentStatus, LlmProviderConfig, create_llm_provider};
 
 /// Agent 步骤执行器
 pub struct AgentExecutor {
@@ -43,7 +44,7 @@ impl Executor for AgentExecutor {
 
         let input_template = step.agent_input.as_deref()
             .ok_or_else(|| WorkflowError::Other("Missing agent_input".to_string()))?;
-        
+
         let template_context = build_template_context(context);
         let input = crate::core::template::TemplateEngine::new()
             .resolve_template(input_template, &template_context)
@@ -54,10 +55,19 @@ impl Executor for AgentExecutor {
                 .map_err(|e| WorkflowError::Other(format!("Failed to set max iterations: {}", e)))?;
         }
 
-        let result = self.agent_manager
-            .run_sync(&session_id, &input, None)
-            .await
-            .map_err(|e| WorkflowError::Other(format!("Agent execution failed: {}", e)))?;
+        let use_stream = step.agent_stream.unwrap_or(false);
+        let result = if use_stream {
+            let callback = build_stream_callback();
+            self.agent_manager
+                .run_sync_stream(&session_id, &input, callback)
+                .await
+                .map_err(|e| WorkflowError::Other(format!("Agent stream execution failed: {}", e)))?
+        } else {
+            self.agent_manager
+                .run_sync(&session_id, &input, None)
+                .await
+                .map_err(|e| WorkflowError::Other(format!("Agent execution failed: {}", e)))?
+        };
 
         self.agent_manager.destroy_session(&session_id).await;
 
@@ -69,6 +79,36 @@ impl Executor for AgentExecutor {
             serde_json::json!({ "answer": result }),
         ).with_timing(started_at, duration_ms))
     }
+}
+
+fn build_stream_callback() -> AgentCallback {
+    let first_chunk = Arc::new(AtomicBool::new(true));
+    Arc::new(move |data: String, status: AgentStatus| {
+        if status == AgentStatus::LlmChunk {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
+                if let Some(delta) = json.get("delta").and_then(|v| v.as_str()) {
+                    if !delta.is_empty() {
+                        if first_chunk.load(Ordering::SeqCst) {
+                            first_chunk.store(false, Ordering::SeqCst);
+                            eprintln!("\n    [Agent Stream]");
+                        }
+                        eprint!("{}", delta);
+                        let _ = std::io::Write::flush(&mut std::io::stderr());
+                    }
+                }
+            }
+        } else if status == AgentStatus::LlmResponse {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
+                if let Some(usage) = json.get("token_usage") {
+                    eprintln!("\n    [Token Usage] prompt={}, completion={}, total={}",
+                        usage.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                        usage.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                        usage.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                    );
+                }
+            }
+        }
+    })
 }
 
 fn parse_llm_provider_config(

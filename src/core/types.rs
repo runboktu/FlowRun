@@ -291,6 +291,8 @@ pub struct StepDefinition {
     pub agent_input: Option<String>,
     /// Agent 最大迭代次数
     pub agent_max_iterations: Option<u32>,
+    /// Agent 是否使用流式输出
+    pub agent_stream: Option<bool>,
 
     // Tool 步骤特有字段
     /// 工具名称
@@ -340,6 +342,7 @@ impl Default for StepDefinition {
             agent_system_prompt: None,
             agent_input: None,
             agent_max_iterations: None,
+            agent_stream: None,
             tool_name: None,
             tool_args: None,
         }
