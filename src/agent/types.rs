@@ -3,7 +3,9 @@
 //! 翻译自 gtht-agent 的 types.hpp
 
 use serde::{Deserialize, Serialize};
+use std::pin::Pin;
 use std::sync::Arc;
+use tokio_stream::Stream;
 
 /// Agent 状态枚举
 /// 
@@ -122,7 +124,6 @@ pub struct LlmResponse {
 }
 
 impl LlmResponse {
-    /// 创建成功响应
     pub fn success(content: impl Into<String>) -> Self {
         Self {
             content: content.into(),
@@ -130,7 +131,6 @@ impl LlmResponse {
         }
     }
 
-    /// 创建失败响应
     pub fn error(content: impl Into<String>) -> Self {
         Self {
             content: content.into(),
@@ -138,6 +138,22 @@ impl LlmResponse {
         }
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenUsage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmChunk {
+    pub delta: String,
+    pub done: bool,
+    pub usage: Option<TokenUsage>,
+}
+
+pub type LlmStream = Pin<Box<dyn Stream<Item = Result<LlmChunk, crate::agent::error::AgentError>> + Send>>;
 
 /// 工具结果结构
 #[derive(Debug, Clone, Serialize, Deserialize)]

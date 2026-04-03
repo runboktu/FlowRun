@@ -28,8 +28,12 @@ tokio = { version = "1.35", features = ["full"] }
 # 异步 trait 支持
 async-trait = "0.1"
 
+# 流式支持
+tokio-stream = "0.1"
+async-stream = "0.3"
+
 # HTTP 客户端
-reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+reqwest = { version = "0.11", features = ["json", "rustls-tls", "stream"] }
 
 # 正则表达式
 regex = "1.10"
@@ -126,3 +130,7 @@ path = "examples/code/06_template_filters.rs"
 [[example]]
 name = "12_checkpoint_resume"
 path = "examples/code/12_checkpoint_resume.rs"
+
+[[example]]
+name = "13_agent_deepseek"
+path = "examples/code/13_agent_deepseek.rs"

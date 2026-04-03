@@ -1,0 +1,58 @@
+# AI Agent 工作流示例 — DeepSeek + Shell 混合
+#
+# 流程：
+#   1. shell 步骤创建工作目录
+#   2. agent 步骤使用 DeepSeek 回答用户问题
+#   3. shell 步骤将答案写入工作目录下的文件
+#
+# 运行方式：
+#   DEEPSEEK_API_KEY=sk-xxx flow-run examples/16_agent_deepseek.yaml run \
+#     --input work_dir=/tmp/flow-agent-demo \
+#     --input question="什么是 Rust 的所有权系统？"
+
+name: "Agent 工作目录示例"
+description: "创建工作目录 → AI 回答问题 → 将答案写入文件"
+version: "1.0.0"
+
+inputs:
+  - name: work_dir
+    type: string
+    required: true
+    description: "工作目录路径"
+
+  - name: question
+    type: string
+    required: true
+    description: "向 AI Agent 提出的问题"
+
+steps:
+  # 步骤 1: 创建工作目录
+  - id: create_workdir
+    name: "创建工作目录"
+    type: shell
+    run: "mkdir -p ${{ inputs.work_dir }}"
+
+  # 步骤 2: AI Agent 回答问题（使用 DeepSeek）
+  - id: answer_question
+    name: "AI 回答问题"
+    type: agent
+    depends_on:
+      - create_workdir
+    agent_input: "${{ inputs.question }}"
+    agent_system_prompt: |
+      你是一个专业的技术助手。请用中文详细、准确地回答用户的问题。
+      回答应当结构清晰，包含必要的代码示例（如果适用）。
+      请直接给出答案，不要使用工具。
+    agent_max_iterations: 1
+
+  # 步骤 3: 将答案写入工作目录下的文件
+  - id: write_answer
+    name: "写入答案文件"
+    type: shell
+    depends_on:
+      - answer_question
+    run: "echo '${{ steps.answer_question.answer }}' > '${{ inputs.work_dir }}/answer.md'"
+
+outputs:
+  answer: "${{ steps.answer_question.answer }}"
+  output_file: "${{ inputs.work_dir }}/answer.md"

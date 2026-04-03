@@ -7,7 +7,7 @@ use crate::core::context::ExecutionContext;
 use crate::core::types::*;
 use crate::executors::Executor;
 use crate::utils::error::WorkflowError;
-use crate::agent::AgentManager;
+use crate::agent::{AgentManager, LlmProviderConfig, create_llm_provider};
 
 /// Agent 步骤执行器
 pub struct AgentExecutor {
@@ -31,8 +31,13 @@ impl Executor for AgentExecutor {
         let step_id = &step.id;
 
         let agent_system_prompt = step.agent_system_prompt.as_deref();
+
+        let llm_config = parse_llm_provider_config(step, context)?;
+        let llm = create_llm_provider(&llm_config)
+            .map_err(|e| WorkflowError::Other(format!("Failed to create LLM provider: {}", e)))?;
+
         let session_id = self.agent_manager
-            .create_session(agent_system_prompt)
+            .create_session_with_llm(llm, agent_system_prompt)
             .await
             .map_err(|e| WorkflowError::Other(format!("Failed to create session: {}", e)))?;
 
@@ -64,6 +69,30 @@ impl Executor for AgentExecutor {
             serde_json::json!({ "answer": result }),
         ).with_timing(started_at, duration_ms))
     }
+}
+
+fn parse_llm_provider_config(
+    _step: &StepDefinition,
+    _context: &ExecutionContext,
+) -> Result<LlmProviderConfig, WorkflowError> {
+    let api_key = std::env::var("DEEPSEEK_API_KEY")
+        .or_else(|_| std::env::var("OPENAI_API_KEY"))
+        .map_err(|_| WorkflowError::Other(
+            "DEEPSEEK_API_KEY or OPENAI_API_KEY environment variable not set".to_string()
+        ))?;
+
+    let provider_type = std::env::var("LLM_PROVIDER")
+        .unwrap_or_else(|_| "deepseek".to_string());
+
+    let model = std::env::var("LLM_MODEL").ok();
+    let base_url = std::env::var("LLM_BASE_URL").ok();
+
+    Ok(LlmProviderConfig {
+        r#type: provider_type,
+        model,
+        api_key,
+        base_url,
+    })
 }
 
 fn build_template_context(context: &ExecutionContext) -> std::collections::HashMap<String, serde_json::Value> {
