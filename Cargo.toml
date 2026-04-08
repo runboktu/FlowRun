@@ -142,3 +142,7 @@ path = "examples/code/17_deepseek_stream.rs"
 [[example]]
 name = "18_agent_stream"
 path = "examples/code/18_agent_stream.rs"
+
+[[example]]
+name = "19_music_composer"
+path = "examples/code/19_music_composer.rs"
