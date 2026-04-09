@@ -1,21 +1,17 @@
 # AI 作曲编曲工作流
 #
-# 功能：
-#   输入原始歌词 + 风格提示词，经过三个 Agent 步骤：
-#     1. 给歌词添加 Suno Tag（段标、情绪标、乐器标等）
-#     2. 生成中文详细作曲提示词
-#     3. 生成英文作曲提示词（严格 < 1000 字符，去除冗余空白）
-#   最终 Shell 步骤将三项结果合并写入文件。
+# 流程（3 步）：
+#   1. Agent: 给歌词添加 Suno Tag
+#   2. Agent: 同时生成中英双语作曲提示词（带工具：check_char_count / strip_whitespace）
+#   3. Shell: 汇总写入文件
 #
-# 运行方式：
-#   DEEPSEEK_API_KEY=sk-xxx flow-run examples/19_music_composer.yaml run \
-#     --input lyrics="南方的冬\n总少了一片素白\n常青的树\n没等来雪的覆盖" \
-#     --input style="heavy blues, saxophone Solo" \
-#     --input output_dir=/tmp/music-output
+# 运行：
+#   DEEPSEEK_API_KEY=sk-xxx cargo run --example 19_music_composer -- \
+#     --lyrics lyrics.txt --style "heavy blues, saxophone Solo" --output-dir /tmp/music-output
 
 name: "AI 作曲编曲工作流"
 description: "原始歌词 → Suno Tag 标注 → 中英双语作曲提示词"
-version: "1.0.0"
+version: "2.0.0"
 
 inputs:
   - name: lyrics
@@ -53,160 +49,109 @@ steps:
       ## 可用的 Suno Tag
 
       ### 段落结构标签
-      - [Intro] 前奏：设置歌曲基调，吸引听众
-      - [Verse] / [Verse 1] / [Verse 2] 主歌：主要叙述部分，提供故事或主题
-      - [Pre-Chorus] 过渡段：增加紧张感，过渡到副歌
-      - [Chorus] 副歌：重复的、记忆深刻的部分，通常是歌曲高潮
-      - [Bridge] 桥段：新的音乐元素或旋律，通常在歌曲中间提供变化
-      - [Post-Chorus] 副歌后段：延续高潮的附加部分
+      - [Intro] 前奏
+      - [Verse] / [Verse 1] / [Verse 2] 主歌
+      - [Pre-Chorus] 过渡段
+      - [Chorus] 副歌（高潮）
+      - [Bridge] 桥段
+      - [Post-Chorus] 副歌后段
       - [Outro] / [End] / [Fade Out] / [Fade to End] 结尾
-      - [Hook] 钩子：短小且容易记住的部分
+      - [Hook] 钩子
 
       ### 人声标签
-      - [female vocal] / [female] 女性人声
-      - [passionate male vocalist] 激情男性歌手
-      - [MurMur] 低语
-      - [overlapping vocals] 重叠人声
-      - [Spoken word] / [Talking] 口语/说话
+      - [female vocal] / [passionate male vocalist] / [MurMur] / [overlapping vocals] / [Spoken word]
 
       ### 音乐标签
-      - [Instrumental] / [Instrumental Solo] / [Short Instrumental] 器乐部分
-      - [Guitar Solo] / [Short Guitar solo] 吉他独奏
-      - [Drums] 鼓
-      - [Break] / [Dramatic break] 休息/戏剧性断点
-      - [Build-up] / [build up] 构建
-      - [drop] 掉落
-      - [Stop] 停止
+      - [Instrumental] / [Instrumental Solo] / [Guitar Solo] / [Drums] / [Break] / [Build-up] / [drop] / [Stop]
 
       ### 节奏与风格标签
-      - [Spoken fast] 快速说唱
-      - [Rap] / [Male Rap] 说唱
-      - [silence] 静音
-      - [Crying] 哭泣声
-      - [Laugh] 笑声
-      - [Live Crowd] 现场观众
+      - [Spoken fast] / [Rap] / [Male Rap] / [silence] / [Crying] / [Laugh] / [Live Crowd]
 
       ### 制作标签
-      - [Finale] / [Finale, together] 结尾
-      - [Finale Chorus] 最终副歌
-      - [Final Vocal Mix] 最终人声混音
-      - [Final Master] 最终母带
-      - [Clean mix] 干净的混音
-      - [Expensive production] 高质量制作
-      - [Dry Reverb] 干混响
+      - [Finale] / [Finale Chorus] / [Final Master] / [Clean mix] / [Expensive production] / [Dry Reverb]
 
       ### 标注规则
-      1. 在歌词开头添加 [Intro] 标签，并在其下方用方括号标注风格/乐器（如 [heavy blues, saxophone Solo]）
-      2. 将歌词划分为合理的段落：主歌 [Verse]、过渡 [Pre-Chorus]、副歌 [Chorus]、桥段 [Bridge] 等
-      3. 在适当位置添加 [Instrumental] 或 [Instrumental Solo] 间奏
-      4. 副歌可重复出现，使用 [Chorus] 标签
-      5. 结尾部分使用 [Outro] 或 [Fade to End]
-      6. 段落之间保持空行分隔
+      1. 歌词开头用 [Intro] + 风格/乐器方括号（如 [heavy blues, saxophone Solo]）
+      2. 按内容划分 [Verse] / [Pre-Chorus] / [Chorus] / [Bridge]
+      3. 适当位置添加 [Instrumental] 间奏
+      4. 副歌重复用 [Chorus]
+      5. 结尾用 [Outro] 或 [Fade to End]
+      6. 段落之间空行分隔
 
-    agent_max_iterations: 10
+    agent_max_iterations: 1
 
-  # ── Step 2: 生成中文作曲提示词 ────────────────────────────
-  - id: chinese_prompt
-    name: "生成中文作曲提示词"
+  # ── Step 2: 生成中英双语作曲提示词 ────────────────────────
+  - id: compose_prompt
+    name: "生成中英双语作曲提示词"
     type: agent
     depends_on:
       - tag_lyrics
     agent_input: |
-      已标注 Suno Tag 的歌词如下：
+      已标注 Suno Tag 的歌词：
       ${{ steps.tag_lyrics.answer }}
 
-      用户指定的风格是：${{ inputs.style }}
+      用户指定的风格：${{ inputs.style }}
 
-      请作为世界级顶级作曲、编曲家，生成详细的中文作曲提示词。
+      请作为世界级顶级作曲/编曲家，完成以下两项任务：
+      1. 生成中文详细作曲提示词
+      2. 将中文提示词翻译为紧凑英文（严格 < 1000 字符，无换行/多余空格）
 
-    agent_system_prompt: |
-      你是一位世界级顶级作曲家和编曲家，精通所有音乐风格。你需要为 AI 音乐生成工具（如 Suno）生成详细的作曲提示词。
+      你拥有以下工具可以调用：
+      - check_char_count: 检查文本字符数是否在限制内
+      - strip_whitespace: 压缩文本中的多余空白字符
 
-      请从以下维度详细描述编曲方案，每个维度用一句话描述：
-
-      1. **人声**：嗓音特质、唱法风格、情绪氛围
-      2. **鼓**：主歌和副歌各自的鼓组编排
-      3. **贝斯**：主歌和副歌各自的贝斯技法
-      4. **打击乐**：沙锤、铃鼓等辅助打击乐
-      5. **键盘**：键盘/合成器类型、和弦技法
-      6. **吉他**：节奏吉他和主音吉他技法
-      7. **管乐/弦乐**：配器方案
-      8. **和声**：和声编排方案
-      9. **结构**：完整曲式结构（前奏→主歌→副歌→桥段→尾奏）
-      10. **音质**：混音质感、空间感描述
-
-      请严格按照上述格式输出，每个维度一行，简洁精准。
-
-    agent_max_iterations: 1
-
-  # ── Step 3: 生成英文作曲提示词（< 1000 字符）─────────────
-  - id: english_prompt
-    name: "生成英文作曲提示词"
-    type: agent
-    depends_on:
-      - chinese_prompt
-    agent_input: |
-      以下是中文作曲提示词：
-      ${{ steps.chinese_prompt.answer }}
-
-      用户指定的风格是：${{ inputs.style }}
-
-      请将上述中文作曲提示词翻译并扩展为英文版 Suno 提示词。
+      **流程**：
+      A. 先在 <chinese>...</chinese> 标签内输出中文作曲提示词
+      B. 然后在 <english>...</english> 标签内输出英文版
+      C. 生成英文后，调用 check_char_count 工具验证字符数
+      D. 如果超过 1000 字符，调用 strip_whitespace 工具压缩，再验证
+      E. 如果仍超限，精简内容后重试
 
     agent_system_prompt: |
-      你是一位世界级顶级作曲家和编曲家。你的任务是将中文作曲提示词翻译为英文 Suno 提示词。
+      你是一位世界级顶级作曲家和编曲家，精通所有音乐风格。
 
-      ## 严格要求
-      1. **英文字符总数严格限制在 1000 字符以内**（包括所有标点和空格）
-      2. 删除所有不必要的空白字符：多余空格、换行、Tab
-      3. 使用紧凑格式：每个维度用句号分隔，写在同一行或少量行内
-      4. 不要使用 Markdown 格式、标题、编号列表
-      5. 直接输出纯文本英文提示词
+      ## 任务
+      根据歌词内容和风格，从以下 10 个维度生成作曲提示词：
+      人声 / 鼓 / 贝斯 / 打击乐 / 键盘 / 吉他 / 管乐弦乐 / 和声 / 曲式结构 / 混音质感
 
-      ## 格式参考
-      Vocals: ... Drums: ... Bass: ... Shaker/tambourine: ... Keyboards: ... Guitar: ... Horns: ... Vocals: ... Structure: Intro(...)→Verse(...)→Chorus(...)→Bridge(...)→Outro(...). Texture. Spatial.
+      ## 输出格式
+      必须使用以下 XML 标签包裹两部分：
+      <chinese>
+      （中文作曲提示词，每个维度一行）
+      </chinese>
+      <english>
+      （英文 Suno 提示词，一整段紧凑文本）
+      </english>
 
-      ## 关键
-      - 最终输出必须是**一整段紧凑的英文文本**
-      - **不要**有任何换行符
-      - **不要**有多余空格
-      - 总字符数 **必须 < 1000**
+      ## 英文部分严格要求
+      1. 总字符数严格 < 1000（含所有标点和空格）
+      2. 不允许任何换行符 \n
+      3. 不允许连续空格（多个空格压缩为 1 个）
+      4. 不允许 Tab 字符
+      5. 不使用 Markdown 格式
 
-    agent_max_iterations: 1
+      ## 工具使用
+      你拥有以下工具：
+      - check_char_count(text, max_chars=1000) → 返回字符数和是否超限
+      - strip_whitespace(text) → 返回压缩空白后的文本
 
-  # ── Step 4: 将结果写入文件 ────────────────────────────────
+      生成英文后必须调用 check_char_count 验证。如果超限：
+      1. 先调用 strip_whitespace 压缩空白
+      2. 再 check_char_count 验证
+      3. 仍超限则主动精简内容
+
+    agent_max_iterations: 5
+
+  # ── Step 3: 将结果写入文件 ────────────────────────────────
   - id: write_output
     name: "写入输出文件"
     type: shell
     depends_on:
       - tag_lyrics
-      - chinese_prompt
-      - english_prompt
-    run: |
-      mkdir -p "${{ inputs.output_dir }}"
-      cat > "${{ inputs.output_dir }}/result.md" << 'ENDOFFILE'
-      # AI 作曲编曲结果
-
-      ## 一、歌词 Suno Tag 标注
-
-      ${{ steps.tag_lyrics.answer }}
-
-      ---
-
-      ## 二、中文作曲提示词
-
-      ${{ steps.chinese_prompt.answer }}
-
-      ---
-
-      ## 三、英文作曲提示词
-
-      ${{ steps.english_prompt.answer }}
-
-      ENDOFFILE
+      - compose_prompt
+    run: "echo 'done'"
 
 outputs:
   tagged_lyrics: "${{ steps.tag_lyrics.answer }}"
-  chinese_prompt: "${{ steps.chinese_prompt.answer }}"
-  english_prompt: "${{ steps.english_prompt.answer }}"
-  output_file: "${{ inputs.output_dir }}/result.md"
+  compose_result: "${{ steps.compose_prompt.answer }}"
+  output_dir: "${{ inputs.output_dir }}"
