@@ -21,3 +21,4 @@ pub use core::parser::WorkflowParser;
 pub use core::runner::FlowRunner;
 pub use core::types::*;
 pub use utils::error::WorkflowError;
+pub use agent::BuiltinToolRegistry;

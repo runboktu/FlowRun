@@ -9,9 +9,11 @@
 use flow_run::core::context::ExecutionContext;
 use flow_run::core::dag::{DagScheduler, Scheduler};
 use flow_run::core::parser::WorkflowParser;
+use flow_run::agent::BuiltinToolRegistry;
 use flow_run::utils::checkpoint::CheckpointManager;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 use tempfile::tempdir;
 
 #[tokio::main]
@@ -99,7 +101,8 @@ async fn main() -> anyhow::Result<()> {
     let checkpoint_dir = tempdir()?;
     let checkpoint_manager = CheckpointManager::new(checkpoint_dir.path().to_path_buf())?;
     let config = workflow.config.clone().unwrap_or_default();
-    let scheduler = Scheduler::new(dag, config, checkpoint_manager);
+    let builtin_registry = Arc::new(BuiltinToolRegistry::with_defaults());
+    let scheduler = Scheduler::new(dag, config, checkpoint_manager, builtin_registry);
     scheduler.set_context(context).await;
     println!("    ✅ Scheduler 创建成功\n");
 

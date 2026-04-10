@@ -8,17 +8,18 @@ use crate::core::context::ExecutionContext;
 use crate::core::types::*;
 use crate::executors::Executor;
 use crate::utils::error::WorkflowError;
-use crate::agent::{AgentManager, AgentCallback, AgentStatus, LlmProviderConfig, create_llm_provider};
+use crate::agent::{AgentManager, AgentCallback, AgentStatus, LlmProviderConfig, create_llm_provider, BuiltinToolRegistry};
 use crate::agent::types::ToolDescriptor;
 use crate::agent::create_tool_handler;
 
 pub struct AgentExecutor {
     agent_manager: Arc<AgentManager>,
+    builtin_registry: Arc<BuiltinToolRegistry>,
 }
 
 impl AgentExecutor {
-    pub fn new(agent_manager: Arc<AgentManager>) -> Self {
-        Self { agent_manager }
+    pub fn new(agent_manager: Arc<AgentManager>, builtin_registry: Arc<BuiltinToolRegistry>) -> Self {
+        Self { agent_manager, builtin_registry }
     }
 }
 
@@ -45,7 +46,7 @@ impl Executor for AgentExecutor {
 
         if let Some(tool_defs) = &step.agent_tools {
             for tool_def in tool_defs {
-                let handler = create_tool_handler(tool_def)?;
+                let handler = create_tool_handler(tool_def, &self.builtin_registry)?;
                 let descriptor = ToolDescriptor {
                     name: tool_def.name.clone(),
                     description: tool_def.description.clone().unwrap_or_default(),

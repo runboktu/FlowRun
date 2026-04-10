@@ -7,6 +7,7 @@
 
 use flow_run::core::context::ExecutionContext;
 use flow_run::core::dag::{DagScheduler, Scheduler};
+use flow_run::agent::BuiltinToolRegistry;
 use flow_run::core::parser::WorkflowParser;
 use flow_run::executors::workflow::{WorkflowExecutor, WorkflowRunner};
 use flow_run::utils::checkpoint::CheckpointManager;
@@ -47,7 +48,7 @@ impl WorkflowRunner for RealWorkflowRunner {
 
         // 创建调度器
         let config = workflow.config.unwrap_or_default();
-        let scheduler = Scheduler::with_workflow_executor(dag, config, checkpoint_manager, workflow_executor);
+        let scheduler = Scheduler::with_workflow_executor(dag, config, checkpoint_manager, workflow_executor, Arc::new(BuiltinToolRegistry::with_defaults()));
         scheduler.set_context(context).await;
         if let Some(outputs) = &workflow.outputs {
             let outputs_map: HashMap<String, String> = outputs
@@ -152,7 +153,7 @@ async fn main() -> anyhow::Result<()> {
     let runner = Arc::new(RealWorkflowRunner);
     let workflow_executor = Arc::new(WorkflowExecutor::new(runner));
 
-    let scheduler = Scheduler::with_workflow_executor(dag, config, checkpoint_manager, workflow_executor);
+    let scheduler = Scheduler::with_workflow_executor(dag, config, checkpoint_manager, workflow_executor, Arc::new(BuiltinToolRegistry::with_defaults()));
     scheduler.set_context(context).await;
     if let Some(outputs) = &workflow.outputs {
         let outputs_map: HashMap<String, String> = outputs

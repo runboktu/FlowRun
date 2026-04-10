@@ -8,6 +8,8 @@
 
 use flow_run::core::context::ExecutionContext;
 use flow_run::core::dag::{DagScheduler, Scheduler};
+use flow_run::agent::BuiltinToolRegistry;
+use std::sync::Arc;
 use flow_run::core::parser::WorkflowParser;
 use flow_run::utils::checkpoint::CheckpointManager;
 use std::collections::HashMap;
@@ -68,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
     let temp_dir = tempdir()?;
     let checkpoint_manager = CheckpointManager::new(temp_dir.path().to_path_buf())?;
     let config = workflow.config.clone().unwrap_or_default();
-    let scheduler = Scheduler::new(dag, config, checkpoint_manager);
+    let scheduler = Scheduler::new(dag, config, checkpoint_manager, Arc::new(BuiltinToolRegistry::with_defaults()));
     scheduler.set_context(context).await;
     if let Some(outputs) = &workflow.outputs {
         let outputs_map: HashMap<String, String> = outputs

@@ -10,6 +10,7 @@ pub mod system_prompt;
 pub mod tool_registry;
 pub mod tool_implementations;
 pub mod tool_factory;
+pub mod builtin_registry;
 pub mod response_parser;
 pub mod react_agent;
 
@@ -27,5 +28,6 @@ pub use llm_adapter::{LlmProvider, LlmProviderConfig, create_llm_provider, DeepS
 pub use tool_registry::ToolRegistry;
 pub use tool_factory::create_tool_handler;
 pub use tool_implementations::{ShellTool, HttpTool, PythonTool};
+pub use builtin_registry::BuiltinToolRegistry;
 pub use response_parser::{ResponseParser, XmlResponseParser, JsonResponseParser, create_parser};
 pub use react_agent::{ReActAgent, AgentManager};

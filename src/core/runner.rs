@@ -1,3 +1,5 @@
+use crate::agent::builtin_registry::BuiltinToolRegistry;
+use crate::agent::ToolHandler;
 use crate::core::context::ExecutionContext;
 use crate::core::dag::{DagScheduler, Scheduler};
 use crate::core::parser::WorkflowParser;
@@ -6,6 +8,7 @@ use crate::utils::checkpoint::CheckpointManager;
 use crate::utils::error::WorkflowError;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// 工作流执行器 — 库的高层 API 入口
 ///
@@ -14,6 +17,7 @@ use std::path::{Path, PathBuf};
 pub struct FlowRunner {
     workflow: WorkflowDefinition,
     checkpoint_dir: PathBuf,
+    builtin_registry: Arc<BuiltinToolRegistry>,
 }
 
 impl FlowRunner {
@@ -22,6 +26,7 @@ impl FlowRunner {
         Self {
             workflow,
             checkpoint_dir: std::env::temp_dir().join(format!("flow-run-{}", std::process::id())),
+            builtin_registry: Arc::new(BuiltinToolRegistry::with_defaults()),
         }
     }
 
@@ -37,12 +42,34 @@ impl FlowRunner {
         self
     }
 
+    /// 注册自定义 builtin 工具（builder 模式）
+    ///
+    /// 注册后可在 YAML 中通过 `source: builtin` + `name: xxx` 使用。
+    /// 如果与默认工具同名，自定义工具优先。
+    pub fn register_builtin(
+        mut self,
+        name: &str,
+        description: &str,
+        handler: Arc<dyn ToolHandler>,
+    ) -> Self {
+        let registry = Arc::get_mut(&mut self.builtin_registry)
+            .expect("register_builtin must be called before run() — Arc should be uniquely owned");
+        registry.register(name, description, handler);
+        self
+    }
+
+    /// 传入预构造的 BuiltinToolRegistry（builder 模式）
+    pub fn with_builtin_registry(mut self, registry: BuiltinToolRegistry) -> Self {
+        self.builtin_registry = Arc::new(registry);
+        self
+    }
+
     /// 执行工作流
     pub async fn run(&self, inputs: HashMap<String, serde_json::Value>) -> Result<WorkflowResult, WorkflowError> {
         let dag = DagScheduler::new(self.workflow.steps.clone())?;
         let checkpoint_manager = CheckpointManager::new(self.checkpoint_dir.clone())?;
         let config = self.workflow.config.clone().unwrap_or_default();
-        let scheduler = Scheduler::new(dag, config, checkpoint_manager);
+        let scheduler = Scheduler::new(dag, config, checkpoint_manager, self.builtin_registry.clone());
 
         let context = ExecutionContext::new(&self.workflow, inputs);
         scheduler.set_context(context).await;
@@ -67,7 +94,7 @@ impl FlowRunner {
         let dag = DagScheduler::new(self.workflow.steps.clone())?;
         let checkpoint_manager = CheckpointManager::new(self.checkpoint_dir.clone())?;
         let config = self.workflow.config.clone().unwrap_or_default();
-        let scheduler = Scheduler::new(dag, config, checkpoint_manager);
+        let scheduler = Scheduler::new(dag, config, checkpoint_manager, self.builtin_registry.clone());
 
         let context = ExecutionContext::new(&self.workflow, inputs);
         scheduler.set_context(context).await;

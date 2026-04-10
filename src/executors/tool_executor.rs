@@ -2,18 +2,21 @@
 
 use chrono::Utc;
 use serde_json::Value;
+use std::sync::Arc;
 
 use crate::core::context::ExecutionContext;
 use crate::core::types::*;
 use crate::executors::Executor;
 use crate::utils::error::WorkflowError;
-use crate::agent::create_tool_handler;
+use crate::agent::{create_tool_handler, BuiltinToolRegistry};
 
-pub struct ToolExecutor {}
+pub struct ToolExecutor {
+    builtin_registry: Arc<BuiltinToolRegistry>,
+}
 
 impl ToolExecutor {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(builtin_registry: Arc<BuiltinToolRegistry>) -> Self {
+        Self { builtin_registry }
     }
 }
 
@@ -34,7 +37,7 @@ impl Executor for ToolExecutor {
             .map_err(|e| WorkflowError::Other(format!("Template error: {}", e)))?;
 
         let result = if let Some(tool_def) = &step.tool {
-            let handler = create_tool_handler(tool_def)?;
+            let handler = create_tool_handler(tool_def, &self.builtin_registry)?;
             handler.execute(&args).await
         } else if let Some(tool_name) = &step.tool_name {
             return Err(WorkflowError::Other(format!(

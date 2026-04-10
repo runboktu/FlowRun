@@ -1,10 +1,7 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::Duration;
 
 use crate::agent::types::{ToolHandler, ToolResult};
-use crate::agent::tool_registry::FnTool;
-use crate::utils::error::WorkflowError;
 
 pub struct ShellTool {
     command_template: String,
@@ -161,57 +158,6 @@ impl ToolHandler for PythonTool {
             Ok(Err(e)) => ToolResult::error(format!("Python execution failed: {}", e)),
             Err(_) => ToolResult::error(format!("Python timed out after {:?}", self.timeout)),
         }
-    }
-}
-
-pub fn create_builtin_tool(name: &str) -> Result<Arc<dyn ToolHandler>, WorkflowError> {
-    match name {
-        "read_file" => Ok(Arc::new(FnTool(|args: String| async move {
-            let parsed: serde_json::Value = serde_json::from_str(&args).unwrap_or_default();
-            let path = parsed["path"].as_str().unwrap_or("");
-            tokio::fs::read_to_string(path)
-                .await
-                .unwrap_or_else(|e| format!("Error reading file: {}", e))
-        }))),
-
-        "write_file" => Ok(Arc::new(FnTool(|args: String| async move {
-            let parsed: serde_json::Value = serde_json::from_str(&args).unwrap_or_default();
-            let path = parsed["path"].as_str().unwrap_or("");
-            let content = parsed["content"].as_str().unwrap_or("");
-            match tokio::fs::write(path, content).await {
-                Ok(()) => format!("Successfully wrote to {}", path),
-                Err(e) => format!("Error writing file: {}", e),
-            }
-        }))),
-
-        "list_directory" => Ok(Arc::new(FnTool(|args: String| async move {
-            let parsed: serde_json::Value = serde_json::from_str(&args).unwrap_or_default();
-            let path = parsed["path"].as_str().unwrap_or(".");
-            match tokio::fs::read_dir(path).await {
-                Ok(mut dir) => {
-                    let mut entries = Vec::new();
-                    while let Ok(Some(entry)) = dir.next_entry().await {
-                        entries.push(entry.file_name().to_string_lossy().to_string());
-                    }
-                    entries.join("\n")
-                }
-                Err(e) => format!("Error listing directory: {}", e)
-            }
-        }))),
-
-        "http_get" => Ok(Arc::new(FnTool(|args: String| async move {
-            let parsed: serde_json::Value = serde_json::from_str(&args).unwrap_or_default();
-            let url = parsed["url"].as_str().unwrap_or("");
-            match reqwest::get(url).await {
-                Ok(r) => r.text().await.unwrap_or_default(),
-                Err(e) => format!("HTTP error: {}", e),
-            }
-        }))),
-
-        _ => Err(WorkflowError::Other(format!(
-            "Unknown builtin tool: '{}'. Available: read_file, write_file, list_directory, http_get",
-            name
-        ))),
     }
 }
 

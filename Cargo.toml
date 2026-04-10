@@ -136,13 +136,13 @@ name = "13_agent_deepseek"
 path = "examples/code/13_agent_deepseek.rs"
 
 [[example]]
-name = "17_deepseek_stream"
-path = "examples/code/17_deepseek_stream.rs"
-
-[[example]]
 name = "18_agent_stream"
 path = "examples/code/18_agent_stream.rs"
 
 [[example]]
 name = "19_music_composer"
 path = "examples/code/19_music_composer.rs"
+
+[[example]]
+name = "20_builtin_tool_extensibility"
+path = "examples/code/20_builtin_tool_extensibility.rs"

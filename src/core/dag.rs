@@ -5,6 +5,7 @@ use crate::executors::approve::ApproveExecutor;
 use crate::executors::agent_executor::AgentExecutor;
 use crate::executors::tool_executor::ToolExecutor;
 use crate::executors::Executor;
+use crate::agent::builtin_registry::BuiltinToolRegistry;
 use crate::utils::checkpoint::CheckpointManager;
 use crate::utils::error::WorkflowError;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
@@ -154,6 +155,7 @@ pub struct Scheduler {
     agent_executor: Arc<AgentExecutor>,
     tool_executor: Arc<ToolExecutor>,
     workflow_outputs: Arc<RwLock<Option<HashMap<String, String>>>>,
+    builtin_registry: Arc<BuiltinToolRegistry>,
 }
 
 impl Scheduler {
@@ -161,6 +163,7 @@ impl Scheduler {
         dag: DagScheduler,
         config: WorkflowConfig,
         checkpoint_manager: CheckpointManager,
+        builtin_registry: Arc<BuiltinToolRegistry>,
     ) -> Self {
         let agent_manager = Arc::new(crate::agent::AgentManager::new());
         
@@ -171,9 +174,10 @@ impl Scheduler {
             checkpoint_manager,
             workflow_executor: Arc::new(WorkflowExecutor::new(Arc::new(NullWorkflowRunner))),
             approve_executor: Arc::new(ApproveExecutor::new()),
-            agent_executor: Arc::new(AgentExecutor::new(agent_manager)),
-            tool_executor: Arc::new(ToolExecutor::new()),
+            agent_executor: Arc::new(AgentExecutor::new(agent_manager, builtin_registry.clone())),
+            tool_executor: Arc::new(ToolExecutor::new(builtin_registry.clone())),
             workflow_outputs: Arc::new(RwLock::new(None)),
+            builtin_registry,
         }
     }
 
@@ -197,6 +201,7 @@ impl Scheduler {
         config: WorkflowConfig,
         checkpoint_manager: CheckpointManager,
         workflow_executor: Arc<WorkflowExecutor>,
+        builtin_registry: Arc<BuiltinToolRegistry>,
     ) -> Self {
         let agent_manager = Arc::new(crate::agent::AgentManager::new());
         
@@ -207,9 +212,10 @@ impl Scheduler {
             checkpoint_manager,
             workflow_executor,
             approve_executor: Arc::new(ApproveExecutor::new()),
-            agent_executor: Arc::new(AgentExecutor::new(agent_manager)),
-            tool_executor: Arc::new(ToolExecutor::new()),
+            agent_executor: Arc::new(AgentExecutor::new(agent_manager, builtin_registry.clone())),
+            tool_executor: Arc::new(ToolExecutor::new(builtin_registry.clone())),
             workflow_outputs: Arc::new(RwLock::new(None)),
+            builtin_registry,
         }
     }
 
@@ -1034,6 +1040,7 @@ impl WorkflowRunner for Scheduler {
             sub_dag,
             self.config.clone(),
             self.checkpoint_manager.clone(),
+            self.builtin_registry.clone(),
         );
 
         let sub_context = ExecutionContext::new(&workflow_def, inputs);

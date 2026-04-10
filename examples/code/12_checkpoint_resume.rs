@@ -3,9 +3,11 @@ use flow_run::core::context::ExecutionContext;
 use flow_run::core::dag::{DagScheduler, Scheduler};
 use flow_run::core::parser::WorkflowParser;
 use flow_run::core::types::OnFailureStrategy;
+use flow_run::agent::BuiltinToolRegistry;
 use flow_run::utils::checkpoint::{Checkpoint, CheckpointManager, TimeoutContext};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 use tempfile::tempdir;
 
 const FLAG_FILE: &str = "/tmp/checkpoint_resume_flag";
@@ -60,6 +62,7 @@ async fn main() -> anyhow::Result<()> {
         DagScheduler::new(workflow.steps.clone())?,
         config.clone(),
         CheckpointManager::new(checkpoint_dir.clone())?,
+        Arc::new(BuiltinToolRegistry::with_defaults()),
     );
     scheduler1.set_context(context).await;
 
@@ -115,6 +118,7 @@ async fn main() -> anyhow::Result<()> {
         DagScheduler::new(workflow.steps.clone())?,
         config.clone(),
         CheckpointManager::new(checkpoint_dir.clone())?,
+        Arc::new(BuiltinToolRegistry::with_defaults()),
     );
     scheduler2.set_context(context2).await;
 

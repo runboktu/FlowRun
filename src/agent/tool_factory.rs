@@ -1,15 +1,23 @@
 use std::sync::Arc;
 
-use crate::agent::tool_implementations::{create_builtin_tool, HttpTool, PythonTool, ShellTool};
+use crate::agent::builtin_registry::BuiltinToolRegistry;
+use crate::agent::tool_implementations::{HttpTool, PythonTool, ShellTool};
 use crate::agent::types::ToolHandler;
 use crate::core::types::{ToolSourceDefinition, ToolSourceType};
 use crate::utils::error::WorkflowError;
 
 pub fn create_tool_handler(
     def: &ToolSourceDefinition,
+    registry: &BuiltinToolRegistry,
 ) -> Result<Arc<dyn ToolHandler>, WorkflowError> {
     match &def.source {
-        ToolSourceType::Builtin => create_builtin_tool(&def.name),
+        ToolSourceType::Builtin => registry.lookup(&def.name).ok_or_else(|| {
+            WorkflowError::Other(format!(
+                "Unknown builtin tool: '{}'. Available: {}",
+                def.name,
+                registry.list_all().join(", ")
+            ))
+        }),
 
         ToolSourceType::Shell => {
             let command = def.command.clone().ok_or_else(|| {

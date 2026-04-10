@@ -215,44 +215,22 @@ steps:
 
         os.makedirs(output_dir, exist_ok=True)
 
-        tagged_lyrics_path = os.path.join(output_dir, "tagged_lyrics.md")
-        chinese_prompt_path = os.path.join(output_dir, "compose_prompt_zh.txt")
-        english_prompt_path = os.path.join(output_dir, "compose_prompt_en.txt")
         report_path = os.path.join(output_dir, "music_composer_result.md")
-        summary_path = os.path.join(output_dir, "summary.json")
-
-        with open(tagged_lyrics_path, "w", encoding="utf-8") as f:
-          f.write(tagged_lyrics.rstrip() + "\n")
-
-        with open(chinese_prompt_path, "w", encoding="utf-8") as f:
-          f.write(chinese_prompt.rstrip() + "\n")
-
-        with open(english_prompt_path, "w", encoding="utf-8") as f:
-          f.write(english_prompt.rstrip() + "\n")
 
         with open(report_path, "w", encoding="utf-8") as f:
           f.write("# Music Composer Result\n\n")
           f.write("## Tagged Lyrics\n\n")
           f.write(tagged_lyrics.rstrip() + "\n\n")
-          f.write("## Chinese Compose Prompt\n\n")
-          f.write(chinese_prompt.rstrip() + "\n\n")
           f.write("## English Compose Prompt\n\n")
-          f.write(english_prompt.rstrip() + "\n")
+          f.write(english_prompt.rstrip() + "\n\n")
+          f.write("## Chinese Compose Prompt\n\n")
+          f.write(chinese_prompt.rstrip() + "\n")
 
-        summary = {
+        print(json.dumps({
           "output_dir": output_dir,
-          "tagged_lyrics_path": tagged_lyrics_path,
-          "chinese_prompt_path": chinese_prompt_path,
-          "english_prompt_path": english_prompt_path,
           "report_path": report_path,
-          "english_char_count": len(english_prompt),
-        }
-
-        with open(summary_path, "w", encoding="utf-8") as f:
-          json.dump(summary, f, ensure_ascii=False, indent=2)
-
-        summary["summary_path"] = summary_path
-        print(json.dumps(summary, ensure_ascii=False))
+          "english_char_count": len(english_prompt)
+        }, ensure_ascii=False))
     tool_args: |
       {
         "tagged_lyrics": ${{ steps.tag_lyrics.answer | to_json }},
@@ -264,9 +242,5 @@ outputs:
   tagged_lyrics: "${{ steps.tag_lyrics.answer }}"
   compose_result: "${{ steps.compose_prompt.answer }}"
   output_dir: "${{ steps.write_output.output_dir }}"
-  tagged_lyrics_path: "${{ steps.write_output.tagged_lyrics_path }}"
-  chinese_prompt_path: "${{ steps.write_output.chinese_prompt_path }}"
-  english_prompt_path: "${{ steps.write_output.english_prompt_path }}"
   report_path: "${{ steps.write_output.report_path }}"
-  summary_path: "${{ steps.write_output.summary_path }}"
   english_char_count: "${{ steps.write_output.english_char_count }}"

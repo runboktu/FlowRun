@@ -65,7 +65,7 @@ pub struct ToolSourceDefinition {
 }
 
 /// 工作流定义的顶层结构
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WorkflowDefinition {
     /// 工作流名称
     pub name: String,

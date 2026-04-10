@@ -9,6 +9,7 @@
 
 use flow_run::core::context::ExecutionContext;
 use flow_run::core::dag::{DagScheduler, Scheduler};
+use flow_run::agent::BuiltinToolRegistry;
 use flow_run::core::parser::WorkflowParser;
 use flow_run::core::types::ApprovalStatus;
 use flow_run::executors::approve::{ApproveExecutor, ApprovalStore, InMemoryApprovalStore};
@@ -88,7 +89,7 @@ async fn main() -> anyhow::Result<()> {
     let temp_dir = tempdir()?;
     let checkpoint_manager = CheckpointManager::new(temp_dir.path().to_path_buf())?;
     let workflow_config = workflow.config.clone().unwrap_or_default();
-    let mut scheduler = Scheduler::new(dag, workflow_config, checkpoint_manager);
+    let mut scheduler = Scheduler::new(dag, workflow_config, checkpoint_manager, Arc::new(BuiltinToolRegistry::with_defaults()));
     scheduler.set_context(context).await;
     scheduler.set_approve_executor(approve_executor);
     if let Some(outputs) = &workflow.outputs {

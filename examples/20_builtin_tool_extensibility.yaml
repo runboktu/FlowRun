@@ -1,0 +1,64 @@
+# Builtin Tool 可扩展示例
+#
+# 演示如何在 YAML 中使用注册的自定义 builtin 工具。
+# 本例注册了两个自定义工具：check_char_count 和 strip_whitespace，
+# 通过 tool step 直接调用，无需 LLM。
+#
+# 运行：
+#   cargo run --example 20_builtin_tool_extensibility
+
+name: "自定义 Builtin 工具演示"
+description: "演示库用户注册自定义 builtin 工具并在 YAML 中使用"
+version: "1.0.0"
+
+inputs:
+  - name: text
+    type: string
+    required: true
+    description: "待处理的文本"
+
+  - name: max_chars
+    type: string
+    required: false
+    default: "50"
+    description: "最大字符数限制"
+
+steps:
+  # ── Step 1: 检查字符数 ──
+  - id: check_length
+    name: "检查文本字符数"
+    type: tool
+    tool:
+      name: check_char_count
+      source: builtin
+    tool_args: |
+      {"text": "${{ inputs.text }}", "max_chars": ${{ inputs.max_chars }}}
+
+  # ── Step 2: 压缩空白 ──
+  - id: strip
+    name: "压缩空白字符"
+    type: tool
+    depends_on:
+      - check_length
+    tool:
+      name: strip_whitespace
+      source: builtin
+    tool_args: |
+      {"text": "${{ inputs.text }}"}
+
+  # ── Step 3: 验证压缩后的字符数 ──
+  - id: verify
+    name: "验证压缩后字符数"
+    type: tool
+    depends_on:
+      - strip
+    tool:
+      name: check_char_count
+      source: builtin
+    tool_args: |
+      {"text": "${{ steps.strip.text }}", "max_chars": ${{ inputs.max_chars }}}
+
+outputs:
+  original_check: "${{ steps.check_length }}"
+  stripped_text: "${{ steps.strip.text }}"
+  verify_check: "${{ steps.verify }}"
