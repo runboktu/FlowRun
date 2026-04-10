@@ -73,5 +73,44 @@ fn build_template_context(context: &ExecutionContext) -> std::collections::HashM
     let mut ctx = std::collections::HashMap::new();
     ctx.insert("inputs".to_string(), serde_json::to_value(&context.inputs).unwrap_or_default());
     ctx.insert("variables".to_string(), serde_json::to_value(&context.variables).unwrap_or_default());
+
+    if let Some(loop_vars) = context.variables.get("loop") {
+        ctx.insert("loop".to_string(), loop_vars.clone());
+    }
+
+    let mut steps = serde_json::Map::new();
+    for (step_id, result) in &context.step_outputs {
+        if let Some(output) = &result.output {
+            steps.insert(step_id.clone(), output.clone());
+        }
+    }
+    ctx.insert("steps".to_string(), Value::Object(steps));
+
     ctx
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_template_context;
+    use crate::core::context::ExecutionContext;
+    use crate::core::types::{StepResult, WorkflowDefinition};
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    #[test]
+    fn build_template_context_includes_step_outputs() {
+        let workflow = WorkflowDefinition::default();
+        let mut context = ExecutionContext::new(&workflow, HashMap::new());
+        context.step_outputs.insert(
+            "compose_prompt".to_string(),
+            StepResult::success("compose_prompt", json!({ "answer": "<english>prompt</english>" })),
+        );
+
+        let template_context = build_template_context(&context);
+
+        assert_eq!(
+            template_context.get("steps"),
+            Some(&json!({ "compose_prompt": { "answer": "<english>prompt</english>" } }))
+        );
+    }
 }
