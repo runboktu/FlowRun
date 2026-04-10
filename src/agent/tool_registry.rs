@@ -56,8 +56,19 @@ impl ToolRegistry {
         let tools = self.tools.read().await;
         match tools.get(name) {
             Some(descriptor) => {
-                info!("[ToolRegistry] Executing tool: {}", name);
-                descriptor.handler.execute(args).await
+                info!(
+                    "[ToolRegistry] Executing tool: {}\n  input: {}",
+                    name,
+                    preview(args),
+                );
+                let result = descriptor.handler.execute(args).await;
+                info!(
+                    "[ToolRegistry] Tool finished: {}\n  output: {}\n  is_error: {}",
+                    name,
+                    preview(&result.content),
+                    result.is_error,
+                );
+                result
             }
             None => {
                 warn!("[ToolRegistry] Tool not found: {}", name);
@@ -100,6 +111,18 @@ impl ToolRegistry {
 impl Default for ToolRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn preview(text: &str) -> String {
+    const LIMIT: usize = 500;
+    let sanitized = text.replace('\n', "\\n");
+    let mut chars = sanitized.chars();
+    let preview: String = chars.by_ref().take(LIMIT).collect();
+    if chars.next().is_some() {
+        format!("{}...(truncated, {} chars total)", preview, sanitized.chars().count())
+    } else {
+        preview
     }
 }
 

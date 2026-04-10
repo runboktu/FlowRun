@@ -1,0 +1,272 @@
+# AI 作曲编曲工作流
+#
+# 流程（3 步）：
+#   1. Agent: 给歌词添加 Suno Tag
+#   2. Agent: 生成中英双语作曲提示词（使用 step 级 agent_tools）
+#   3. Tool: 解析 XML 结果并写入输出文件（使用 inline tool）
+#
+# 运行：
+#   DEEPSEEK_API_KEY=sk-xxx cargo run --example 19_music_composer -- \
+#     --lyrics lyrics.txt --style "heavy blues, saxophone solo" --output-dir /tmp/music-output
+
+name: "AI 作曲编曲工作流"
+description: "原始歌词 -> Suno Tag 标注 -> 中英双语作曲提示词 -> 写入文件"
+version: "3.0.0"
+
+inputs:
+  - name: lyrics
+    type: string
+    required: true
+    description: "原始歌词文本"
+
+  - name: style
+    type: string
+    required: true
+    description: "歌曲风格提示词（如：heavy blues, saxophone solo）"
+
+  - name: output_dir
+    type: string
+    required: false
+    default: "/tmp/music-output"
+    description: "输出目录"
+
+steps:
+  - id: tag_lyrics
+    name: "歌词添加 Suno Tag"
+    type: agent
+    agent_stream: true
+    agent_input: |
+      请为以下歌词添加 Suno Tag 标注。用户指定的风格是：${{ inputs.style }}
+
+      原始歌词：
+      ${{ inputs.lyrics }}
+
+      请直接输出添加了 Suno Tag 的完整歌词，不要多余解释。
+    agent_system_prompt: |
+      你是一个专业的 Suno AI 音乐制作专家。你的任务是为歌词添加 Suno Tag 元标签，使 Suno AI 能够根据标签生成高质量音乐。
+
+      ## 可用的 Suno Tag
+      - 段落结构标签: [Intro], [Verse], [Verse 1], [Verse 2], [Pre-Chorus], [Chorus], [Bridge], [Post-Chorus], [Outro], [End], [Fade Out], [Fade to End], [Hook]
+      - 人声标签: [female vocal], [passionate male vocalist], [MurMur], [overlapping vocals], [Spoken word]
+      - 音乐标签: [Instrumental], [Instrumental Solo], [Guitar Solo], [Drums], [Break], [Build-up], [drop], [Stop]
+      - 节奏与风格标签: [Spoken fast], [Rap], [Male Rap], [silence], [Crying], [Laugh], [Live Crowd]
+      - 制作标签: [Finale], [Finale Chorus], [Final Master], [Clean mix], [Expensive production], [Dry Reverb]
+
+      ## 标注规则
+      1. 歌词开头用 [Intro] + 风格/乐器方括号（如 [heavy blues, saxophone solo]）
+      2. 按内容划分 [Verse] / [Pre-Chorus] / [Chorus] / [Bridge]
+      3. 适当位置添加 [Instrumental] 间奏
+      4. 副歌重复用 [Chorus]
+      5. 结尾用 [Outro] 或 [Fade to End]
+      6. 段落之间空行分隔
+    agent_max_iterations: 10
+
+  - id: compose_prompt
+    name: "生成中英双语作曲提示词"
+    type: agent
+    agent_stream: true
+    depends_on:
+      - tag_lyrics
+    agent_input: |
+      已标注 Suno Tag 的歌词：
+      ${{ steps.tag_lyrics.answer }}
+
+      用户指定的风格：${{ inputs.style }}
+
+      请作为世界级顶级作曲/编曲家，完成以下两项任务：
+      1. 先直接生成英文作曲提示词
+      2. 对英文作曲提示词先做空白压缩，再校验字符数
+      3. 英文满足要求后，再翻译为中文详细作曲提示词
+
+      你可以调用工具来检查英文长度和清理空白。
+
+      必须输出：
+      <english>
+      英文作曲提示词
+      </english>
+      <chinese>
+      中文作曲提示词
+      </chinese>
+    agent_system_prompt: |
+      你是一位世界级顶级作曲家和编曲家，精通所有音乐风格。
+
+      ## 任务
+      根据歌词内容和风格，从以下 10 个维度生成作曲提示词：
+      人声 / 鼓 / 贝斯 / 打击乐 / 键盘 / 吉他 / 管乐弦乐 / 和声 / 曲式结构 / 混音质感
+
+      ## 输出格式
+      必须使用以下 XML 标签包裹两部分：
+      <english>
+      （英文 Suno 提示词，一整段紧凑文本）
+      </english>
+      <chinese>
+      （基于最终英文提示词翻译出的中文作曲提示词，每个维度一行）
+      </chinese>
+
+      ## 英文部分严格要求
+      1. 总字符数严格 < 1000（含所有标点和空格）
+      2. 不允许任何换行符
+      3. 不允许连续空格（多个空格压缩为 1 个）
+      4. 不允许 Tab 字符
+      5. 不使用 Markdown 格式
+
+      ## 工具使用要求
+      你拥有以下工具：
+      - check_char_count(text, max_chars=1000): 返回 char_count / within_limit / exceeded_by
+      - strip_whitespace(text): 返回 cleaned_text / cleaned_length
+
+      ## 必须遵守的工作流
+      1. 先生成英文作曲提示词草稿
+      2. 立刻调用 strip_whitespace 压缩英文中的换行、Tab 和多余空格
+      3. 对 strip_whitespace 返回的 cleaned_text 调用 check_char_count
+      4. 如果仍然 >= 1000 字符，继续精简英文内容，然后重复：
+         先 strip_whitespace，再 check_char_count
+      5. 只有当最终英文提示词满足字符数 < 1000 后，才能开始翻译中文
+      6. 中文内容必须忠实于最终英文版本，不要额外扩写超出英文内容的信息
+
+      最终答案只输出 XML，不要附带解释。
+      最终 XML 中必须先输出 <english>，再输出 <chinese>。
+    agent_max_iterations: 6
+    agent_tools:
+      - name: check_char_count
+        description: "检查英文提示词字符数是否超出上限"
+        json_schema: |
+          {
+            "type": "object",
+            "properties": {
+              "text": { "type": "string" },
+              "max_chars": { "type": "integer", "default": 1000 }
+            },
+            "required": ["text"]
+          }
+        source: python
+        timeout_secs: 10
+        script: |
+          import json, sys
+
+          args = json.loads(sys.argv[1])
+          text = args.get("text", "")
+          max_chars = int(args.get("max_chars", 1000))
+          char_count = len(text)
+
+          print(json.dumps({
+              "char_count": char_count,
+              "max_chars": max_chars,
+              "within_limit": char_count <= max_chars,
+              "exceeded_by": max(0, char_count - max_chars)
+          }, ensure_ascii=False))
+
+      - name: strip_whitespace
+        description: "压缩换行、Tab 和连续空格，生成紧凑英文提示词"
+        json_schema: |
+          {
+            "type": "object",
+            "properties": {
+              "text": { "type": "string" }
+            },
+            "required": ["text"]
+          }
+        source: python
+        timeout_secs: 10
+        script: |
+          import json, re, sys
+
+          args = json.loads(sys.argv[1])
+          text = args.get("text", "")
+          cleaned = re.sub(r"\s+", " ", text).strip()
+
+          print(json.dumps({
+              "cleaned_text": cleaned,
+              "original_length": len(text),
+              "cleaned_length": len(cleaned),
+              "removed_count": max(0, len(text) - len(cleaned))
+          }, ensure_ascii=False))
+
+  - id: write_output
+    name: "写入输出文件"
+    type: tool
+    depends_on:
+      - tag_lyrics
+      - compose_prompt
+    tool:
+      name: write_music_outputs
+      description: "解析作曲提示词 XML 并写入结果文件"
+      source: python
+      timeout_secs: 30
+      script: |
+        import json
+        import os
+        import re
+        import sys
+
+        args = json.loads(sys.argv[1])
+        tagged_lyrics = args["tagged_lyrics"]
+        compose_result = args["compose_result"]
+        output_dir = os.path.abspath(args["output_dir"])
+
+        chinese_match = re.search(r"<chinese>\s*(.*?)\s*</chinese>", compose_result, re.S | re.I)
+        english_match = re.search(r"<english>\s*(.*?)\s*</english>", compose_result, re.S | re.I)
+
+        if not chinese_match or not english_match:
+          raise SystemExit("compose_result 缺少 <chinese> 或 <english> 标签")
+
+        chinese_prompt = chinese_match.group(1).strip()
+        english_prompt = english_match.group(1).strip()
+
+        os.makedirs(output_dir, exist_ok=True)
+
+        tagged_lyrics_path = os.path.join(output_dir, "tagged_lyrics.md")
+        chinese_prompt_path = os.path.join(output_dir, "compose_prompt_zh.txt")
+        english_prompt_path = os.path.join(output_dir, "compose_prompt_en.txt")
+        report_path = os.path.join(output_dir, "music_composer_result.md")
+        summary_path = os.path.join(output_dir, "summary.json")
+
+        with open(tagged_lyrics_path, "w", encoding="utf-8") as f:
+          f.write(tagged_lyrics.rstrip() + "\n")
+
+        with open(chinese_prompt_path, "w", encoding="utf-8") as f:
+          f.write(chinese_prompt.rstrip() + "\n")
+
+        with open(english_prompt_path, "w", encoding="utf-8") as f:
+          f.write(english_prompt.rstrip() + "\n")
+
+        with open(report_path, "w", encoding="utf-8") as f:
+          f.write("# Music Composer Result\n\n")
+          f.write("## Tagged Lyrics\n\n")
+          f.write(tagged_lyrics.rstrip() + "\n\n")
+          f.write("## Chinese Compose Prompt\n\n")
+          f.write(chinese_prompt.rstrip() + "\n\n")
+          f.write("## English Compose Prompt\n\n")
+          f.write(english_prompt.rstrip() + "\n")
+
+        summary = {
+          "output_dir": output_dir,
+          "tagged_lyrics_path": tagged_lyrics_path,
+          "chinese_prompt_path": chinese_prompt_path,
+          "english_prompt_path": english_prompt_path,
+          "report_path": report_path,
+          "english_char_count": len(english_prompt),
+        }
+
+        with open(summary_path, "w", encoding="utf-8") as f:
+          json.dump(summary, f, ensure_ascii=False, indent=2)
+
+        summary["summary_path"] = summary_path
+        print(json.dumps(summary, ensure_ascii=False))
+    tool_args: |
+      {
+        "tagged_lyrics": ${{ steps.tag_lyrics.answer | to_json }},
+        "compose_result": ${{ steps.compose_prompt.answer | to_json }},
+        "output_dir": ${{ inputs.output_dir | to_json }}
+      }
+
+outputs:
+  tagged_lyrics: "${{ steps.tag_lyrics.answer }}"
+  compose_result: "${{ steps.compose_prompt.answer }}"
+  output_dir: "${{ steps.write_output.output_dir }}"
+  tagged_lyrics_path: "${{ steps.write_output.tagged_lyrics_path }}"
+  chinese_prompt_path: "${{ steps.write_output.chinese_prompt_path }}"
+  english_prompt_path: "${{ steps.write_output.english_prompt_path }}"
+  report_path: "${{ steps.write_output.report_path }}"
+  summary_path: "${{ steps.write_output.summary_path }}"
+  english_char_count: "${{ steps.write_output.english_char_count }}"

@@ -4,7 +4,6 @@ use serde_yaml;
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
-
 /// 工作流解析器
 ///
 /// 负责从 YAML 文件或字符串解析工作流定义，并进行验证
@@ -107,6 +106,9 @@ impl WorkflowParser {
         // 检查循环依赖
         Self::validate_no_cycles(&workflow.steps)?;
 
+        // 检查步骤中的工具声明
+        Self::validate_step_tools(&workflow.steps)?;
+
         Ok(())
     }
 
@@ -184,6 +186,96 @@ impl WorkflowParser {
                 Self::collect_step_ids(do_steps, all_ids);
             }
         }
+    }
+
+    fn validate_step_tools(steps: &[StepDefinition]) -> Result<(), WorkflowError> {
+        for step in steps {
+            match &step.r#type {
+                StepType::Agent => {
+                    if let Some(tools) = &step.agent_tools {
+                        Self::validate_tool_definitions(
+                            tools,
+                            &format!("agent step '{}'", step.id),
+                        )?;
+                    }
+                }
+                StepType::Tool => {
+                    if let Some(tool_def) = &step.tool {
+                        Self::validate_single_tool(tool_def, &format!("tool step '{}'", step.id))?;
+                    } else if step.tool_name.is_none() {
+                        return Err(WorkflowError::SchemaValidationError {
+                            message: format!(
+                                "Tool step '{}' must have 'tool' (inline definition)",
+                                step.id
+                            ),
+                        });
+                    }
+                }
+                _ => {}
+            }
+
+            if let Some(sub_steps) = &step.steps {
+                Self::validate_step_tools(sub_steps)?;
+            }
+            if let Some(then_steps) = &step.then_steps {
+                Self::validate_step_tools(then_steps)?;
+            }
+            if let Some(else_steps) = &step.else_steps {
+                Self::validate_step_tools(else_steps)?;
+            }
+            if let Some(do_steps) = &step.do_steps {
+                Self::validate_step_tools(do_steps)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_tool_definitions(
+        tools: &[ToolSourceDefinition],
+        context: &str,
+    ) -> Result<(), WorkflowError> {
+        let mut names = HashSet::new();
+        for tool in tools {
+            if !names.insert(&tool.name) {
+                return Err(WorkflowError::SchemaValidationError {
+                    message: format!("Duplicate tool name '{}' in {}", tool.name, context),
+                });
+            }
+            Self::validate_single_tool(tool, context)?;
+        }
+        Ok(())
+    }
+
+    fn validate_single_tool(
+        tool: &ToolSourceDefinition,
+        context: &str,
+    ) -> Result<(), WorkflowError> {
+        match &tool.source {
+            ToolSourceType::Builtin => {}
+            ToolSourceType::Shell if tool.command.is_none() => {
+                return Err(WorkflowError::SchemaValidationError {
+                    message: format!(
+                        "Shell tool '{}' in {} requires 'command'",
+                        tool.name, context
+                    ),
+                });
+            }
+            ToolSourceType::Http if tool.url.is_none() => {
+                return Err(WorkflowError::SchemaValidationError {
+                    message: format!("HTTP tool '{}' in {} requires 'url'", tool.name, context),
+                });
+            }
+            ToolSourceType::Python if tool.script.is_none() => {
+                return Err(WorkflowError::SchemaValidationError {
+                    message: format!(
+                        "Python tool '{}' in {} requires 'script'",
+                        tool.name, context
+                    ),
+                });
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     /// 检查循环依赖
@@ -336,8 +428,11 @@ steps:
                     agent_system_prompt: None,
                     agent_input: None,
                     agent_max_iterations: None,
+                    agent_stream: None,
                     tool_name: None,
                     tool_args: None,
+                    agent_tools: None,
+                    tool: None,
                 },
                 StepDefinition {
                     id: "step1".to_string(),
@@ -378,8 +473,11 @@ steps:
                     agent_system_prompt: None,
                     agent_input: None,
                     agent_max_iterations: None,
+                    agent_stream: None,
                     tool_name: None,
                     tool_args: None,
+                    agent_tools: None,
+                    tool: None,
                 },
             ],
             on: None,
@@ -440,8 +538,11 @@ steps:
                     agent_system_prompt: None,
                     agent_input: None,
                     agent_max_iterations: None,
+                    agent_stream: None,
                     tool_name: None,
                     tool_args: None,
+                    agent_tools: None,
+                    tool: None,
                 },
                 StepDefinition {
                     id: "step2".to_string(),
@@ -482,8 +583,11 @@ steps:
                     agent_system_prompt: None,
                     agent_input: None,
                     agent_max_iterations: None,
+                    agent_stream: None,
                     tool_name: None,
                     tool_args: None,
+                    agent_tools: None,
+                    tool: None,
                 },
             ],
             on: None,
@@ -544,8 +648,11 @@ steps:
                     agent_system_prompt: None,
                     agent_input: None,
                     agent_max_iterations: None,
+                    agent_stream: None,
                     tool_name: None,
                     tool_args: None,
+                    agent_tools: None,
+                    tool: None,
                 },
                 StepDefinition {
                     id: "step2".to_string(),
@@ -586,8 +693,11 @@ steps:
                     agent_system_prompt: None,
                     agent_input: None,
                     agent_max_iterations: None,
+                    agent_stream: None,
                     tool_name: None,
                     tool_args: None,
+                    agent_tools: None,
+                    tool: None,
                 },
                 StepDefinition {
                     id: "step3".to_string(),
@@ -628,8 +738,11 @@ steps:
                     agent_system_prompt: None,
                     agent_input: None,
                     agent_max_iterations: None,
+                    agent_stream: None,
                     tool_name: None,
                     tool_args: None,
+                    agent_tools: None,
+                    tool: None,
                 },
             ],
             on: None,
@@ -691,8 +804,11 @@ steps:
                     agent_system_prompt: None,
                     agent_input: None,
                     agent_max_iterations: None,
+                    agent_stream: None,
                     tool_name: None,
                     tool_args: None,
+                    agent_tools: None,
+                    tool: None,
                 },
                 StepDefinition {
                     id: "step2".to_string(),
@@ -733,8 +849,11 @@ steps:
                     agent_system_prompt: None,
                     agent_input: None,
                     agent_max_iterations: None,
+                    agent_stream: None,
                     tool_name: None,
                     tool_args: None,
+                    agent_tools: None,
+                    tool: None,
                 },
                 StepDefinition {
                     id: "step3".to_string(),
@@ -775,8 +894,11 @@ steps:
                     agent_system_prompt: None,
                     agent_input: None,
                     agent_max_iterations: None,
+                    agent_stream: None,
                     tool_name: None,
                     tool_args: None,
+                    agent_tools: None,
+                    tool: None,
                 },
             ],
             on: None,

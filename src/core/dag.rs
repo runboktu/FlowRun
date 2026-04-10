@@ -162,8 +162,7 @@ impl Scheduler {
         config: WorkflowConfig,
         checkpoint_manager: CheckpointManager,
     ) -> Self {
-        let tool_registry = Arc::new(crate::agent::ToolRegistry::new());
-        let agent_manager = Arc::new(crate::agent::AgentManager::new(tool_registry.clone()));
+        let agent_manager = Arc::new(crate::agent::AgentManager::new());
         
         Self {
             dag,
@@ -173,7 +172,7 @@ impl Scheduler {
             workflow_executor: Arc::new(WorkflowExecutor::new(Arc::new(NullWorkflowRunner))),
             approve_executor: Arc::new(ApproveExecutor::new()),
             agent_executor: Arc::new(AgentExecutor::new(agent_manager)),
-            tool_executor: Arc::new(ToolExecutor::new(tool_registry)),
+            tool_executor: Arc::new(ToolExecutor::new()),
             workflow_outputs: Arc::new(RwLock::new(None)),
         }
     }
@@ -199,8 +198,7 @@ impl Scheduler {
         checkpoint_manager: CheckpointManager,
         workflow_executor: Arc<WorkflowExecutor>,
     ) -> Self {
-        let tool_registry = Arc::new(crate::agent::ToolRegistry::new());
-        let agent_manager = Arc::new(crate::agent::AgentManager::new(tool_registry.clone()));
+        let agent_manager = Arc::new(crate::agent::AgentManager::new());
         
         Self {
             dag,
@@ -210,7 +208,7 @@ impl Scheduler {
             workflow_executor,
             approve_executor: Arc::new(ApproveExecutor::new()),
             agent_executor: Arc::new(AgentExecutor::new(agent_manager)),
-            tool_executor: Arc::new(ToolExecutor::new(tool_registry)),
+            tool_executor: Arc::new(ToolExecutor::new()),
             workflow_outputs: Arc::new(RwLock::new(None)),
         }
     }
@@ -1117,8 +1115,11 @@ mod tests {
                     agent_system_prompt: None,
                     agent_input: None,
                     agent_max_iterations: None,
+                    agent_stream: None,
                     tool_name: None,
                     tool_args: None,
+                    agent_tools: None,
+                    tool: None,
                 },
             StepDefinition {
                 id: "step2".to_string(),
@@ -1159,8 +1160,11 @@ mod tests {
                     agent_system_prompt: None,
                     agent_input: None,
                     agent_max_iterations: None,
+                    agent_stream: None,
                     tool_name: None,
                     tool_args: None,
+                    agent_tools: None,
+                    tool: None,
                 },
         ];
 
@@ -1214,8 +1218,11 @@ mod tests {
                     agent_system_prompt: None,
                     agent_input: None,
                     agent_max_iterations: None,
+                    agent_stream: None,
                     tool_name: None,
                     tool_args: None,
+                    agent_tools: None,
+                    tool: None,
                 },
             StepDefinition {
                 id: "step2".to_string(),
@@ -1256,8 +1263,11 @@ mod tests {
                     agent_system_prompt: None,
                     agent_input: None,
                     agent_max_iterations: None,
+                    agent_stream: None,
                     tool_name: None,
                     tool_args: None,
+                    agent_tools: None,
+                    tool: None,
                 },
         ];
 

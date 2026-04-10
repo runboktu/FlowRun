@@ -5,6 +5,65 @@ use std::collections::HashMap;
 /// 工作流步骤的唯一标识符
 pub type StepId = String;
 
+/// 工具来源类型
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolSourceType {
+    /// 内置工具（Rust 实现，按名称匹配）
+    Builtin,
+    /// Shell 命令执行
+    Shell,
+    /// HTTP API 调用
+    Http,
+    /// Python 脚本执行
+    Python,
+}
+
+/// 工具来源定义
+///
+/// 在 YAML 的 agent_tools[] 或 tool 字段中声明。
+/// 描述一个工具的元信息和实现来源。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolSourceDefinition {
+    /// 工具名称
+    pub name: String,
+
+    /// 工具描述（给 LLM 看的）
+    #[serde(default)]
+    pub description: Option<String>,
+
+    /// JSON Schema（描述参数结构，给 LLM 看的）
+    #[serde(default)]
+    pub json_schema: Option<String>,
+
+    /// 工具来源类型
+    pub source: ToolSourceType,
+
+    // ─── Shell 来源字段 ───
+    #[serde(default)]
+    pub command: Option<String>,
+
+    // ─── HTTP 来源字段 ───
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub method: Option<String>,
+    #[serde(default)]
+    pub headers: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub body_template: Option<String>,
+
+    // ─── Python 来源字段 ───
+    #[serde(default)]
+    pub script: Option<String>,
+
+    // ─── 安全配置 ───
+    #[serde(default)]
+    pub timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub allow_failure: Option<bool>,
+}
+
 /// 工作流定义的顶层结构
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowDefinition {
@@ -291,12 +350,23 @@ pub struct StepDefinition {
     pub agent_input: Option<String>,
     /// Agent 最大迭代次数
     pub agent_max_iterations: Option<u32>,
+    /// Agent 是否使用流式输出
+    pub agent_stream: Option<bool>,
 
     // Tool 步骤特有字段
-    /// 工具名称
+    /// 工具名称（兼容旧模式）
     pub tool_name: Option<String>,
     /// 工具参数（JSON 字符串或模板表达式）
     pub tool_args: Option<String>,
+
+    // ─── Per-Step 工具注册 ───
+    /// Agent 步骤：该 Agent 独享的工具列表
+    #[serde(default)]
+    pub agent_tools: Option<Vec<ToolSourceDefinition>>,
+
+    /// Tool 步骤：内联工具定义
+    #[serde(default)]
+    pub tool: Option<ToolSourceDefinition>,
 }
 
 impl Default for StepDefinition {
@@ -340,8 +410,11 @@ impl Default for StepDefinition {
             agent_system_prompt: None,
             agent_input: None,
             agent_max_iterations: None,
+            agent_stream: None,
             tool_name: None,
             tool_args: None,
+            agent_tools: None,
+            tool: None,
         }
     }
 }

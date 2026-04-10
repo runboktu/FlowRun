@@ -1,0 +1,24 @@
+name: "Agent 流式输出示例"
+description: "使用 call_stream 实时输出 Agent 生成内容"
+version: "1.0.0"
+
+inputs:
+  - name: question
+    type: string
+    required: true
+    description: "向 AI Agent 提出的问题"
+
+steps:
+  - id: answer_question
+    name: "AI 流式回答"
+    type: agent
+    agent_input: "${{ inputs.question }}"
+    agent_system_prompt: |
+      你是一个专业的技术助手。请用中文详细、准确地回答用户的问题。
+      回答应当结构清晰，包含必要的代码示例（如果适用）。
+      请直接给出答案，不要使用工具。
+    agent_max_iterations: 1
+    agent_stream: true
+
+outputs:
+  answer: "${{ steps.answer_question.answer }}"
