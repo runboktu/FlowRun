@@ -674,8 +674,11 @@ mod tests {
             agent_system_prompt: None,
             agent_input: None,
             agent_max_iterations: None,
+            agent_stream: None,
             tool_name: None,
             tool_args: None,
+            agent_tools: None,
+            tool: None,
         };
 
         let result = executor.execute(&step, &context).await.unwrap();

@@ -1,6 +1,5 @@
 //! Tool 步骤执行器
 
-use std::sync::Arc;
 use chrono::Utc;
 use serde_json::Value;
 
@@ -8,16 +7,13 @@ use crate::core::context::ExecutionContext;
 use crate::core::types::*;
 use crate::executors::Executor;
 use crate::utils::error::WorkflowError;
-use crate::agent::ToolRegistry;
+use crate::agent::create_tool_handler;
 
-/// Tool 步骤执行器
-pub struct ToolExecutor {
-    tool_registry: Arc<ToolRegistry>,
-}
+pub struct ToolExecutor {}
 
 impl ToolExecutor {
-    pub fn new(tool_registry: Arc<ToolRegistry>) -> Self {
-        Self { tool_registry }
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
@@ -31,23 +27,25 @@ impl Executor for ToolExecutor {
         let started_at = Utc::now();
         let step_id = &step.id;
 
-        let tool_name = step.tool_name.as_deref()
-            .ok_or_else(|| WorkflowError::Other("Missing tool_name".to_string()))?;
-
         let args_template = step.tool_args.as_deref().unwrap_or("{}");
         let template_context = build_template_context(context);
         let args = crate::core::template::TemplateEngine::new()
             .resolve_template(args_template, &template_context)
             .map_err(|e| WorkflowError::Other(format!("Template error: {}", e)))?;
 
-        if !self.tool_registry.has_tool(tool_name).await {
+        let result = if let Some(tool_def) = &step.tool {
+            let handler = create_tool_handler(tool_def)?;
+            handler.execute(&args).await
+        } else if let Some(tool_name) = &step.tool_name {
             return Err(WorkflowError::Other(format!(
-                "Tool '{}' not found in registry",
+                "Tool '{}' not found. Use inline 'tool:' definition instead of 'tool_name'.",
                 tool_name
             )));
-        }
-
-        let result = self.tool_registry.execute(tool_name, &args).await;
+        } else {
+            return Err(WorkflowError::Other(
+                "Tool step must have 'tool' (inline definition)".to_string()
+            ));
+        };
 
         let completed_at = Utc::now();
         let duration_ms = (completed_at - started_at).num_milliseconds() as u64;

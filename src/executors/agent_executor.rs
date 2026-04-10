@@ -9,8 +9,9 @@ use crate::core::types::*;
 use crate::executors::Executor;
 use crate::utils::error::WorkflowError;
 use crate::agent::{AgentManager, AgentCallback, AgentStatus, LlmProviderConfig, create_llm_provider};
+use crate::agent::types::ToolDescriptor;
+use crate::agent::create_tool_handler;
 
-/// Agent 步骤执行器
 pub struct AgentExecutor {
     agent_manager: Arc<AgentManager>,
 }
@@ -42,13 +43,29 @@ impl Executor for AgentExecutor {
             .await
             .map_err(|e| WorkflowError::Other(format!("Failed to create session: {}", e)))?;
 
-        let input_template = step.agent_input.as_deref()
-            .ok_or_else(|| WorkflowError::Other("Missing agent_input".to_string()))?;
+        if let Some(tool_defs) = &step.agent_tools {
+            for tool_def in tool_defs {
+                let handler = create_tool_handler(tool_def)?;
+                let descriptor = ToolDescriptor {
+                    name: tool_def.name.clone(),
+                    description: tool_def.description.clone().unwrap_or_default(),
+                    json_schema: tool_def.json_schema.clone(),
+                    handler,
+                };
+                self.agent_manager
+                    .register_tool(&session_id, descriptor)
+                    .await
+                    .map_err(|e| WorkflowError::Other(
+                        format!("Failed to register tool '{}': {}", tool_def.name, e)
+                    ))?;
+            }
+            tracing::info!(
+                "[AgentExecutor] Registered {} tools for agent step '{}'",
+                tool_defs.len(), step_id
+            );
+        }
 
-        let template_context = build_template_context(context);
-        let input = crate::core::template::TemplateEngine::new()
-            .resolve_template(input_template, &template_context)
-            .map_err(|e| WorkflowError::Other(format!("Template error: {}", e)))?;
+        let input = resolve_agent_input(step, context)?;
 
         if let Some(max_iter) = step.agent_max_iterations {
             self.agent_manager.set_max_iterations(&session_id, max_iter).await
@@ -79,6 +96,18 @@ impl Executor for AgentExecutor {
             serde_json::json!({ "answer": result }),
         ).with_timing(started_at, duration_ms))
     }
+}
+
+fn resolve_agent_input(
+    step: &StepDefinition,
+    context: &ExecutionContext,
+) -> Result<String, WorkflowError> {
+    let input_template = step.agent_input.as_deref()
+        .ok_or_else(|| WorkflowError::Other("Missing agent_input".to_string()))?;
+    let template_context = build_template_context(context);
+    crate::core::template::TemplateEngine::new()
+        .resolve_template(input_template, &template_context)
+        .map_err(|e| WorkflowError::Other(format!("Template error: {}", e)))
 }
 
 fn build_stream_callback() -> AgentCallback {

@@ -34,13 +34,12 @@ pub struct ReActAgent {
 impl ReActAgent {
     pub fn new(
         session_id: String,
-        tool_registry: Arc<ToolRegistry>,
         llm_provider: Arc<dyn LlmProvider>,
     ) -> Self {
         Self {
             session_id,
             messages: Vec::new(),
-            tool_registry,
+            tool_registry: Arc::new(ToolRegistry::new()),
             llm_provider,
             parser: create_parser(ParserType::Xml),
             max_iterations: 10,
@@ -373,15 +372,13 @@ impl ReActAgent {
 pub struct AgentManager {
     sessions: Arc<RwLock<HashMap<String, ReActAgent>>>,
     default_llm: Option<Arc<dyn LlmProvider>>,
-    tool_registry: Arc<ToolRegistry>,
 }
 
 impl AgentManager {
-    pub fn new(tool_registry: Arc<ToolRegistry>) -> Self {
+    pub fn new() -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             default_llm: None,
-            tool_registry,
         }
     }
 
@@ -395,11 +392,7 @@ impl AgentManager {
         let llm = self.default_llm.clone()
             .ok_or_else(|| AgentError::ConfigError("No LLM provider set".to_string()))?;
 
-        let mut agent = ReActAgent::new(
-            session_id.clone(),
-            self.tool_registry.clone(),
-            llm,
-        );
+        let mut agent = ReActAgent::new(session_id.clone(), llm);
 
         if let Some(prompt) = user_prompt {
             agent.set_user_prompt(prompt);
@@ -417,11 +410,7 @@ impl AgentManager {
     ) -> Result<String, AgentError> {
         let session_id = Uuid::new_v4().to_string();
 
-        let mut agent = ReActAgent::new(
-            session_id.clone(),
-            self.tool_registry.clone(),
-            llm,
-        );
+        let mut agent = ReActAgent::new(session_id.clone(), llm);
 
         if let Some(prompt) = user_prompt {
             agent.set_user_prompt(prompt);
@@ -489,8 +478,12 @@ impl AgentManager {
         Ok(())
     }
 
-    pub async fn register_tool(&self, descriptor: ToolDescriptor) {
-        self.tool_registry.register(descriptor).await;
+    pub async fn register_tool(&self, session_id: &str, descriptor: ToolDescriptor) -> Result<(), AgentError> {
+        let sessions = self.sessions.read().await;
+        let agent = sessions.get(session_id)
+            .ok_or_else(|| AgentError::SessionNotFound(session_id.to_string()))?;
+        agent.register_tool(descriptor).await;
+        Ok(())
     }
 
     pub async fn session_ids(&self) -> Vec<String> {
@@ -499,10 +492,6 @@ impl AgentManager {
 
     pub async fn session_count(&self) -> usize {
         self.sessions.read().await.len()
-    }
-
-    pub fn tool_registry(&self) -> &Arc<ToolRegistry> {
-        &self.tool_registry
     }
 }
 
@@ -514,16 +503,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_react_agent_basic() {
-        let tool_registry = Arc::new(ToolRegistry::new());
-        tool_registry.register_tool(
-            "echo",
-            "Echoes input",
-            None,
-            Arc::new(FnTool(|args: String| async move {
-                format!("Echo: {}", args)
-            })),
-        ).await;
-
         let llm = Arc::new(MockLlmProvider::new(vec![
             r#"<thought>I should use echo tool</thought><action>{"name":"echo","parameters":{"message":"hello"}}</action>"#.to_string(),
             r#"<thought>Done</thought><final_answer>The result is Echo: hello</final_answer>"#.to_string(),
@@ -531,9 +510,17 @@ mod tests {
 
         let mut agent = ReActAgent::new(
             "test-session".to_string(),
-            tool_registry,
             llm,
         );
+
+        agent.register_tool(ToolDescriptor {
+            name: "echo".to_string(),
+            description: "Echoes input".to_string(),
+            json_schema: None,
+            handler: Arc::new(FnTool(|args: String| async move {
+                format!("Echo: {}", args)
+            })),
+        }).await;
 
         let result = agent.run("Echo hello").await.unwrap();
         assert!(result.contains("Echo: hello"));
@@ -541,12 +528,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_agent_manager() {
-        let tool_registry = Arc::new(ToolRegistry::new());
         let llm = Arc::new(MockLlmProvider::new(vec![
             r#"<final_answer>Hello!</final_answer>"#.to_string(),
         ]));
 
-        let manager = AgentManager::new(tool_registry).with_llm(llm);
+        let manager = AgentManager::new().with_llm(llm);
         let session_id = manager.create_session(Some("You are helpful")).await.unwrap();
 
         assert!(manager.session_exists(&session_id).await);
