@@ -150,7 +150,10 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    if result.status != flow_run::core::types::WorkflowStatus::Success {
+    if !matches!(
+        result.status,
+        flow_run::core::types::WorkflowStatus::Success
+    ) {
         bail!("工作流执行失败");
     }
 

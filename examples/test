@@ -1,9 +1,0 @@
-把19_music_composer.rs 实现为一个cli工具
-1. lyrics 是cli参数，是文件路径
-2. style 是cli参数，是字符串
-3. output_dir 是cli 参数，是字符串
-
-19_music_composer.yaml
-1. Step 2 和 Step 3 可以合并
-2. 对于英文提示词的输出字数和格式要求 **不要**有任何换行符 **不要**有多余空格，除了提示词限制外，可以给agent增加工具，
-检查字符长度工具，过滤空格、tab、换行等工具。

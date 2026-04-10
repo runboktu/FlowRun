@@ -55,7 +55,11 @@ pub struct OpenAiCompatibleProvider {
 impl OpenAiCompatibleProvider {
     pub fn new(api_key: &str, model: &str, base_url: &str) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            // Avoid macOS sandbox crashes when reqwest tries to read system proxy settings.
+            client: reqwest::Client::builder()
+                .no_proxy()
+                .build()
+                .expect("failed to create LLM HTTP client"),
             api_key: api_key.to_string(),
             model: model.to_string(),
             base_url: base_url.trim_end_matches('/').to_string(),
