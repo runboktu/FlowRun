@@ -74,7 +74,7 @@ impl Executor for AgentExecutor {
 
         let use_stream = step.agent_stream.unwrap_or(false);
         let result = if use_stream {
-            let callback = build_stream_callback();
+            let callback = build_stream_callback(step_id.clone());
             self.agent_manager
                 .run_sync_stream(&session_id, &input, callback)
                 .await
@@ -110,32 +110,62 @@ fn resolve_agent_input(
         .map_err(|e| WorkflowError::Other(format!("Template error: {}", e)))
 }
 
-fn build_stream_callback() -> AgentCallback {
+fn build_stream_callback(step_id: String) -> AgentCallback {
     let first_chunk = Arc::new(AtomicBool::new(true));
     Arc::new(move |data: String, status: AgentStatus| {
-        if status == AgentStatus::LlmChunk {
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
-                if let Some(delta) = json.get("delta").and_then(|v| v.as_str()) {
-                    if !delta.is_empty() {
-                        if first_chunk.load(Ordering::SeqCst) {
-                            first_chunk.store(false, Ordering::SeqCst);
-                            eprintln!("\n    [Agent Stream]");
+        match status {
+            AgentStatus::IterationStart => {
+                eprintln!("\n    [Agent Stream:{}] starting", step_id);
+            }
+            AgentStatus::LlmCall => {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
+                    let iteration = json.get("iteration").and_then(|v| v.as_u64()).unwrap_or(0);
+                    eprintln!("    [Agent Stream:{}] iteration {} llm_call", step_id, iteration);
+                }
+            }
+            AgentStatus::LlmChunk => {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
+                    if let Some(delta) = json.get("delta").and_then(|v| v.as_str()) {
+                        if !delta.is_empty() {
+                            if first_chunk.load(Ordering::SeqCst) {
+                                first_chunk.store(false, Ordering::SeqCst);
+                                eprintln!("    [Agent Stream:{}] output:", step_id);
+                            }
+                            eprint!("{}", delta);
+                            let _ = std::io::Write::flush(&mut std::io::stderr());
                         }
-                        eprint!("{}", delta);
-                        let _ = std::io::Write::flush(&mut std::io::stderr());
                     }
                 }
             }
-        } else if status == AgentStatus::LlmResponse {
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
-                if let Some(usage) = json.get("token_usage") {
-                    eprintln!("\n    [Token Usage] prompt={}, completion={}, total={}",
-                        usage.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
-                        usage.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
-                        usage.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
-                    );
+            AgentStatus::ToolCall => {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
+                    let tool_name = json.get("tool_name").and_then(|v| v.as_str()).unwrap_or("unknown");
+                    eprintln!("\n    [Agent Stream:{}] tool_call {}", step_id, tool_name);
                 }
             }
+            AgentStatus::ToolResult => {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
+                    let is_error = json.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false);
+                    eprintln!("    [Agent Stream:{}] tool_result is_error={}", step_id, is_error);
+                }
+            }
+            AgentStatus::LlmResponse => {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
+                    let prompt = json.get("prompt_tokens").and_then(|v| v.as_u64());
+                    let completion = json.get("completion_tokens").and_then(|v| v.as_u64());
+                    let total = json.get("total_tokens").and_then(|v| v.as_u64());
+                    if let (Some(prompt), Some(completion), Some(total)) = (prompt, completion, total) {
+                        eprintln!(
+                            "\n    [Agent Stream:{}] token_usage prompt={}, completion={}, total={}",
+                            step_id, prompt, completion, total
+                        );
+                    }
+                }
+            }
+            AgentStatus::IterationEnd => {
+                eprintln!("\n    [Agent Stream:{}] finished", step_id);
+            }
+            AgentStatus::Retry | AgentStatus::Unknown => {}
         }
     })
 }

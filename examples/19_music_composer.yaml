@@ -34,6 +34,7 @@ steps:
   - id: tag_lyrics
     name: "歌词添加 Suno Tag"
     type: agent
+    agent_stream: true
     agent_input: |
       请为以下歌词添加 Suno Tag 标注。用户指定的风格是：${{ inputs.style }}
 
@@ -58,11 +59,12 @@ steps:
       4. 副歌重复用 [Chorus]
       5. 结尾用 [Outro] 或 [Fade to End]
       6. 段落之间空行分隔
-    agent_max_iterations: 1
+    agent_max_iterations: 10
 
   - id: compose_prompt
     name: "生成中英双语作曲提示词"
     type: agent
+    agent_stream: true
     depends_on:
       - tag_lyrics
     agent_input: |
