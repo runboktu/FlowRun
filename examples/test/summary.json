@@ -4,5 +4,5 @@
   "chinese_prompt_path": "/Users/mingshu/workspace/code/ai/cli/flow-run/examples/test/compose_prompt_zh.txt",
   "english_prompt_path": "/Users/mingshu/workspace/code/ai/cli/flow-run/examples/test/compose_prompt_en.txt",
   "report_path": "/Users/mingshu/workspace/code/ai/cli/flow-run/examples/test/music_composer_result.md",
-  "english_char_count": 837
+  "english_char_count": 883
 }

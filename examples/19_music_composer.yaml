@@ -74,18 +74,19 @@ steps:
       用户指定的风格：${{ inputs.style }}
 
       请作为世界级顶级作曲/编曲家，完成以下两项任务：
-      1. 生成中文详细作曲提示词
-      2. 将中文提示词翻译为紧凑英文（严格 < 1000 字符，无换行/多余空格）
+      1. 先直接生成英文作曲提示词
+      2. 对英文作曲提示词先做空白压缩，再校验字符数
+      3. 英文满足要求后，再翻译为中文详细作曲提示词
 
       你可以调用工具来检查英文长度和清理空白。
 
       必须输出：
-      <chinese>
-      中文作曲提示词
-      </chinese>
       <english>
       英文作曲提示词
       </english>
+      <chinese>
+      中文作曲提示词
+      </chinese>
     agent_system_prompt: |
       你是一位世界级顶级作曲家和编曲家，精通所有音乐风格。
 
@@ -95,12 +96,12 @@ steps:
 
       ## 输出格式
       必须使用以下 XML 标签包裹两部分：
-      <chinese>
-      （中文作曲提示词，每个维度一行）
-      </chinese>
       <english>
       （英文 Suno 提示词，一整段紧凑文本）
       </english>
+      <chinese>
+      （基于最终英文提示词翻译出的中文作曲提示词，每个维度一行）
+      </chinese>
 
       ## 英文部分严格要求
       1. 总字符数严格 < 1000（含所有标点和空格）
@@ -114,12 +115,17 @@ steps:
       - check_char_count(text, max_chars=1000): 返回 char_count / within_limit / exceeded_by
       - strip_whitespace(text): 返回 cleaned_text / cleaned_length
 
-      生成英文后必须调用 check_char_count 验证。如果超限：
-      1. 先调用 strip_whitespace 压缩空白
-      2. 再调用 check_char_count 验证
-      3. 如果仍超限，主动精简内容后继续验证
+      ## 必须遵守的工作流
+      1. 先生成英文作曲提示词草稿
+      2. 立刻调用 strip_whitespace 压缩英文中的换行、Tab 和多余空格
+      3. 对 strip_whitespace 返回的 cleaned_text 调用 check_char_count
+      4. 如果仍然 >= 1000 字符，继续精简英文内容，然后重复：
+         先 strip_whitespace，再 check_char_count
+      5. 只有当最终英文提示词满足字符数 < 1000 后，才能开始翻译中文
+      6. 中文内容必须忠实于最终英文版本，不要额外扩写超出英文内容的信息
 
       最终答案只输出 XML，不要附带解释。
+      最终 XML 中必须先输出 <english>，再输出 <chinese>。
     agent_max_iterations: 6
     agent_tools:
       - name: check_char_count

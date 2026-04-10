@@ -1,6 +1,6 @@
-[Intro] [heavy blues, saxophone Solo]
+[Intro] [indie folk, acoustic guitar]
 
-[Verse 1]
+[Verse]
 南方的冬
 总少了一片素白
 常青的树
@@ -31,7 +31,7 @@
 北风吹响风铃 把时光惊散
 再也回不去 大雪纷飞的少年
 
-[Instrumental Solo]
+[Instrumental] [acoustic guitar solo]
 
 [Chorus]
 新雪覆盖旧雪 岁岁年年
@@ -42,13 +42,17 @@
 北风吹响风铃 把时光惊散
 再也回不去 大雪纷飞的少年
 
+[Bridge]
+列车穿过岁末 去向了从前
+北风吹响风铃 把时光惊散
+再也回不去 大雪纷飞的少年
+
 [Chorus]
 列车穿过岁末 去向了从前
 北风吹响风铃 把时光惊散
 再也回不去 大雪纷飞的少年
 
-[Outro]
+[Outro] [fade out]
 列车穿过岁末 去向了从前
 北风吹响风铃 把时光惊散
 再也回不去 大雪纷飞的少年
-[Fade to End]
