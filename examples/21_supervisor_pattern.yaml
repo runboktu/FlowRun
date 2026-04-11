@@ -1,0 +1,196 @@
+# ═══════════════════════════════════════════════════════════════
+# flow-run Supervisor 多智能体编排模式
+#
+# 实现架构：Fan-out / Fan-in（扇出-汇聚）
+#
+#                  ┌──────────────┐
+#                  │  Supervisor   │
+#                  │  Agent        │ ← 分析问题，规划任务分工
+#                  └──────┬───────┘
+#                         │
+#                   ┌─────┘
+#                   ▼
+#             ┌──────────┐
+#             │ Research  │ ← 研究数据
+#             │  Agent    │
+#             └─────┬────┘
+#                   │
+#                   ▼
+#             ┌──────────┐
+#             │   Math    │ ← 拿到研究数据后计算
+#             │  Agent    │
+#             └─────┬────┘
+#                   │
+#                   ▼
+#             ┌──────────┐
+#             │  Writer   │ ← 汇聚研究结果和计算结果
+#             │  Agent    │
+#             └─────┬────┘
+#                   ▼
+#             最终输出
+#
+# flow-run DAG 调度自动识别依赖关系：
+#   Batch 1: [supervisor]
+#   Batch 2: [research]        ← 等待 supervisor
+#   Batch 3: [math]            ← 等待 supervisor + research
+#   Batch 4: [writer]          ← 等待 research + math
+#   Batch 5: [summary]
+#
+# 数据流：Agent 输入通过 ${{ steps.xxx.answer }} 模板引用上游步骤输出
+#
+# 引擎限制说明：
+#   - 当前引擎不支持 While 循环中的动态变量更新
+#   - Condition 步骤无法引用 steps.xxx（模板上下文仅含 variables + inputs）
+#   - 因此采用 Pipeline 模式：Supervisor → Research → Math → Writer
+#   - Math 通过 ${{ steps.research.answer }} 获取研究数据
+#
+# 运行：
+#   DEEPSEEK_API_KEY=sk-xxx cargo run --example 21_supervisor_pattern
+# ═══════════════════════════════════════════════════════════════
+
+name: "Supervisor 多智能体编排"
+description: "Pipeline 多 Agent 协作 — Supervisor 规划，Research 收集数据，Math 计算，Writer 汇聚"
+version: "1.0.0"
+
+inputs:
+  - name: question
+    type: string
+    required: true
+    description: "用户的问题（Supervisor 将分析并分发给专业 Agent）"
+
+steps:
+  # ═══════════════════════════════════════════════════════════
+  # Phase 1: Supervisor — 分析问题，规划任务分工
+  # ═══════════════════════════════════════════════════════════
+  - id: supervisor
+    name: "Supervisor 分析规划"
+    type: agent
+    agent_system_prompt: |
+      你是一个团队管理者（Supervisor），管理以下专业 Agent：
+
+      1. **研究专家** — 负责搜索信息、查找资料、获取数据
+      2. **数学专家** — 负责数学计算（加法、乘法、开方等）
+      3. **写作专家** — 负责撰写最终答案
+
+      你的任务：
+      1. 分析用户的问题
+      2. 明确指出哪些信息需要研究、哪些需要计算
+      3. 给出具体的研究方向和计算步骤
+
+      你的输出将传递给研究专家和数学专家。
+      研究专家先执行，数学专家会拿到研究专家的数据后再计算。
+      请清晰地区分「需要研究的内容」和「需要计算的内容」。
+    agent_input: |
+      请分析以下问题，给出详细的研究方向和计算步骤：
+
+      用户问题：${{ inputs.question }}
+    agent_max_iterations: 5
+    agent_stream: true
+
+  # ═══════════════════════════════════════════════════════════
+  # Phase 2: 专家并行执行（DAG 自动调度为同一 batch）
+  # ═══════════════════════════════════════════════════════════
+
+  # ── 研究专家 ──
+  - id: research
+    name: "研究专家"
+    type: agent
+    depends_on:
+      - supervisor
+    agent_system_prompt: |
+      你是一个世界级研究员，擅长获取和分析信息。
+      你的任务是收集 Supervisor 要求的数据和信息。
+      你没有网络搜索工具，请基于你的训练知识回答。对于 FAANG 公司等知名企业的数据，提供合理的估算值即可。
+      如果问题不需要研究，简要说明即可。
+    agent_input: |
+      原始问题：${{ inputs.question }}
+
+      Supervisor 的分析规划：
+      ${{ steps.supervisor.answer }}
+
+      请根据 Supervisor 指示，基于你的知识完成研究工作。提供你认为最准确的数据。
+      如果不需要研究，输出「无需额外研究」并说明原因。
+    agent_max_iterations: 5
+    agent_stream: true
+
+  # ── 数学专家 ──
+  - id: math
+    name: "数学专家"
+    type: agent
+    depends_on:
+      - supervisor
+      - research
+    agent_system_prompt: |
+      你是一个数学专家，擅长精确计算。
+      你的任务是根据 Supervisor 的规划和研究专家提供的数据完成所需的计算。
+      请展示完整的计算过程，给出精确的数值结果。
+      如果不需要计算，简要说明即可。
+    agent_input: |
+      原始问题：${{ inputs.question }}
+
+      Supervisor 的分析规划：
+      ${{ steps.supervisor.answer }}
+
+      研究专家已提供的数据：
+      ${{ steps.research.answer }}
+
+      请根据 Supervisor 指示和研究专家提供的数据，完成需要的计算工作。
+      展示完整计算过程。如果不需要计算，输出「无需额外计算」并说明原因。
+    agent_max_iterations: 5
+    agent_stream: true
+
+  # ═══════════════════════════════════════════════════════════
+  # Phase 3: Writer — 汇聚所有专家结果，撰写最终答案
+  # ═══════════════════════════════════════════════════════════
+  - id: writer
+    name: "写作专家"
+    type: agent
+    depends_on:
+      - research
+      - math
+    agent_system_prompt: |
+      你是一个专业的写作专家，擅长综合信息并撰写清晰、全面的回答。
+
+      你的任务：
+      1. 综合研究专家收集的信息
+      2. 综合数学专家的计算结果
+      3. 撰写一个完整、准确、结构化的最终答案
+
+      答案应该直接回应用户的原始问题，逻辑清晰，数据准确。
+    agent_input: |
+      原始问题：${{ inputs.question }}
+
+      研究专家的发现：
+      ${{ steps.research.answer }}
+
+      数学专家的计算结果：
+      ${{ steps.math.answer }}
+
+      请综合以上信息，撰写完整、准确的最终答案。
+    agent_max_iterations: 5
+    agent_stream: true
+
+  # ═══════════════════════════════════════════════════════════
+  # Phase 4: 输出汇总
+  # ═══════════════════════════════════════════════════════════
+  - id: summary
+    name: "执行总结"
+    type: shell
+    depends_on:
+      - writer
+    run: |
+      echo "========================================="
+      echo "  Supervisor 多智能体编排完成"
+      echo "========================================="
+      echo "用户问题: ${{ inputs.question }}"
+      echo ""
+      echo "最终答案:"
+      echo "${{ steps.writer.answer }}"
+      echo ""
+      echo "========================================="
+
+outputs:
+  answer: "${{ steps.writer.answer }}"
+  supervisor_analysis: "${{ steps.supervisor.answer }}"
+  research_findings: "${{ steps.research.answer }}"
+  math_results: "${{ steps.math.answer }}"

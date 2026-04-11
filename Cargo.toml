@@ -146,3 +146,7 @@ path = "examples/code/19_music_composer.rs"
 [[example]]
 name = "20_builtin_tool_extensibility"
 path = "examples/code/20_builtin_tool_extensibility.rs"
+
+[[example]]
+name = "21_supervisor_pattern"
+path = "examples/code/21_supervisor_pattern.rs"
