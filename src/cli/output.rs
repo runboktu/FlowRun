@@ -26,7 +26,8 @@ pub fn print_result(result: &WorkflowResult, json: bool) {
             if let Some(stdout) = output.get("stdout").and_then(|v| v.as_str()) {
                 let trimmed = stdout.replace('\n', " ").trim().to_string();
                 if !trimmed.is_empty() {
-                    print!("  {}", &trimmed[..trimmed.len().min(120)]);
+                    let truncated: String = trimmed.chars().take(120).collect();
+                    print!("  {}", truncated);
                 }
             }
             if let Some(status_code) = output.get("status_code") {

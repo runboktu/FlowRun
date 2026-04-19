@@ -6,6 +6,7 @@ use crate::core::parser::WorkflowParser;
 use crate::core::types::*;
 use crate::utils::checkpoint::CheckpointManager;
 use crate::utils::error::WorkflowError;
+use crate::utils::run_context::RunContext;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -16,6 +17,7 @@ use std::sync::Arc;
 /// 外部应用只需 `FlowRunner::from_file()` + `runner.run()` 即可执行工作流。
 pub struct FlowRunner {
     workflow: WorkflowDefinition,
+    workflow_path: PathBuf,
     checkpoint_dir: PathBuf,
     builtin_registry: Arc<BuiltinToolRegistry>,
 }
@@ -25,6 +27,7 @@ impl FlowRunner {
     pub fn new(workflow: WorkflowDefinition) -> Self {
         Self {
             workflow,
+            workflow_path: PathBuf::new(),
             checkpoint_dir: std::env::temp_dir().join(format!("flow-run-{}", std::process::id())),
             builtin_registry: Arc::new(BuiltinToolRegistry::with_defaults()),
         }
@@ -32,8 +35,13 @@ impl FlowRunner {
 
     /// 从 YAML 文件创建
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, WorkflowError> {
-        let workflow = WorkflowParser::from_file(path)?;
-        Ok(Self::new(workflow))
+        let workflow = WorkflowParser::from_file(&path)?;
+        Ok(Self {
+            workflow,
+            workflow_path: path.as_ref().to_path_buf(),
+            checkpoint_dir: std::env::temp_dir().join(format!("flow-run-{}", std::process::id())),
+            builtin_registry: Arc::new(BuiltinToolRegistry::with_defaults()),
+        })
     }
 
     /// 设置检查点目录（builder 模式）
@@ -69,7 +77,9 @@ impl FlowRunner {
         let dag = DagScheduler::new(self.workflow.steps.clone())?;
         let checkpoint_manager = CheckpointManager::new(self.checkpoint_dir.clone())?;
         let config = self.workflow.config.clone().unwrap_or_default();
-        let scheduler = Scheduler::new(dag, config, checkpoint_manager, self.builtin_registry.clone());
+        let scheduler = Scheduler::new_with_workflow_path(
+            dag, config, checkpoint_manager, self.builtin_registry.clone(), Some(self.workflow_path.clone()),
+        );
 
         let context = ExecutionContext::new(&self.workflow, inputs);
         scheduler.set_context(context).await;
@@ -146,6 +156,53 @@ impl FlowRunner {
     /// 获取工作流定义的引用
     pub fn workflow(&self) -> &WorkflowDefinition {
         &self.workflow
+    }
+
+    /// 获取工作流文件路径
+    pub fn workflow_path(&self) -> &Path {
+        &self.workflow_path
+    }
+
+    /// 从指定步骤继续执行（加载上次失败时保存的上下文）
+    pub async fn run_from_step(
+        &self,
+        from_step_id: &str,
+        inputs: HashMap<String, serde_json::Value>,
+    ) -> Result<(WorkflowResult, usize), WorkflowError> {
+        // 加载保存的运行上下文
+        let saved_context = RunContext::load(&self.workflow_path)?;
+
+        // 合并 inputs：CLI 传入的优先
+        let mut merged_inputs = saved_context.inputs.clone();
+        for (k, v) in inputs {
+            merged_inputs.insert(k, v);
+        }
+
+        let dag = DagScheduler::new(self.workflow.steps.clone())?;
+        let checkpoint_manager = CheckpointManager::new(self.checkpoint_dir.clone())?;
+        let config = self.workflow.config.clone().unwrap_or_default();
+        let scheduler = Scheduler::new_with_workflow_path(
+            dag, config, checkpoint_manager, self.builtin_registry.clone(), Some(self.workflow_path.clone()),
+        );
+
+        let context = ExecutionContext::new(&self.workflow, merged_inputs);
+        scheduler.set_context(context).await;
+
+        if let Some(outputs) = &self.workflow.outputs {
+            let outputs_map: HashMap<String, String> = outputs
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            scheduler.set_outputs(outputs_map).await;
+        }
+
+        scheduler
+            .run_from_step(
+                from_step_id,
+                saved_context.step_outputs,
+                saved_context.variables,
+            )
+            .await
     }
 }
 

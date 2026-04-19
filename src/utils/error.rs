@@ -164,6 +164,19 @@ pub enum WorkflowError {
     #[error("G005: 工作流不存在: {workflow}")]
     WorkflowNotFound { workflow: String },
 
+    // ========== Hxxx - 运行上下文错误 ==========
+    /// H001: 运行上下文不存在（--from-step 找不到保存的上下文）
+    #[error("H001: 未找到运行上下文，请先正常执行工作流: {workflow_file}")]
+    RunContextNotFound { workflow_file: String },
+
+    /// H002: 运行上下文加载失败
+    #[error("H002: 运行上下文加载失败: {path} - {reason}")]
+    RunContextLoadFailed { path: String, reason: String },
+
+    /// H003: 指定的步骤 ID 不存在于工作流中
+    #[error("H003: 步骤 '{step_id}' 不存在于工作流中。可用步骤: {available}")]
+    FromStepNotFound { step_id: String, available: String },
+
     // ========== 通用错误 ==========
     /// IO 错误
     #[error("IO 错误: {0}")]

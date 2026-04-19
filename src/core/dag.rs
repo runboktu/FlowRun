@@ -8,8 +8,10 @@ use crate::executors::Executor;
 use crate::agent::builtin_registry::BuiltinToolRegistry;
 use crate::utils::checkpoint::CheckpointManager;
 use crate::utils::error::WorkflowError;
+use crate::utils::run_context::{FailedStepInfo, RunContext};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{RwLock, Semaphore};
@@ -156,6 +158,8 @@ pub struct Scheduler {
     tool_executor: Arc<ToolExecutor>,
     workflow_outputs: Arc<RwLock<Option<HashMap<String, String>>>>,
     builtin_registry: Arc<BuiltinToolRegistry>,
+    /// 工作流文件路径，用于保存运行上下文
+    workflow_path: Option<PathBuf>,
 }
 
 impl Scheduler {
@@ -164,6 +168,17 @@ impl Scheduler {
         config: WorkflowConfig,
         checkpoint_manager: CheckpointManager,
         builtin_registry: Arc<BuiltinToolRegistry>,
+    ) -> Self {
+        Self::new_with_workflow_path(dag, config, checkpoint_manager, builtin_registry, None)
+    }
+
+    /// 创建 Scheduler 并指定工作流文件路径（用于每步保存运行上下文）
+    pub fn new_with_workflow_path(
+        dag: DagScheduler,
+        config: WorkflowConfig,
+        checkpoint_manager: CheckpointManager,
+        builtin_registry: Arc<BuiltinToolRegistry>,
+        workflow_path: Option<PathBuf>,
     ) -> Self {
         let agent_manager = Arc::new(crate::agent::AgentManager::new());
         
@@ -178,6 +193,7 @@ impl Scheduler {
             tool_executor: Arc::new(ToolExecutor::new(builtin_registry.clone())),
             workflow_outputs: Arc::new(RwLock::new(None)),
             builtin_registry,
+            workflow_path,
         }
     }
 
@@ -216,6 +232,7 @@ impl Scheduler {
             tool_executor: Arc::new(ToolExecutor::new(builtin_registry.clone())),
             workflow_outputs: Arc::new(RwLock::new(None)),
             builtin_registry,
+            workflow_path: None,
         }
     }
 
@@ -249,7 +266,6 @@ impl Scheduler {
                         ChronoDuration::seconds(300),
                     );
 
-                    // 设置检查点状态
                     for result in &all_results {
                         if result.status == StepStatus::Success {
                             checkpoint.mark_step_completed(result.step_id.clone());
@@ -259,17 +275,28 @@ impl Scheduler {
                         checkpoint.record_step_output(result.step_id.clone(), result.clone());
                     }
 
-                    // 复制变量
                     for (key, value) in ctx.variables.iter() {
                         checkpoint.set_variable(key.clone(), value.clone());
                     }
 
                     checkpoint.current_batch = batch_index;
 
-                    // 保存检查点
                     let _ = self.checkpoint_manager.save(&mut checkpoint);
                 }
             }
+
+            // 每步保存运行上下文
+            let failed_info = if has_failure {
+                all_results.iter().find(|r| r.status == StepStatus::Failed).map(|r| FailedStepInfo {
+                    step_id: r.step_id.clone(),
+                    error_code: r.error.as_ref().map(|e| e.code.clone()).unwrap_or_default(),
+                    error_message: r.error.as_ref().map(|e| e.message.clone()).unwrap_or_default(),
+                    fix_suggestion: r.error.as_ref().and_then(|e| e.fix.clone()),
+                })
+            } else {
+                None
+            };
+            self.persist_run_context(&all_results, failed_info).await;
 
             if let Some(on_failure) = &self.config.on_failure {
                 if has_failure {
@@ -538,29 +565,101 @@ impl Scheduler {
         drop(ctx);
 
         tracing::info!("执行命令: {}", command);
-        let output = tokio::process::Command::new("sh")
+
+        let step_timeout = Self::parse_step_timeout(step_def.timeout.as_deref())?;
+
+        // Use piped stdout (for template capture) + inherited stderr (direct to terminal).
+        // Using .output() for both breaks edge-tts's aiohttp WebSocket connections
+        // because pipe-buffered stderr causes asyncio event loop issues.
+        let mut child = tokio::process::Command::new("sh")
             .arg("-c")
-            .arg(command)
-            .output()
-            .await
+            .arg(&command)
+            .env("PYTHONUNBUFFERED", "1")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::inherit())
+            .spawn()
             .map_err(|e| WorkflowError::Other(format!("执行命令失败: {}", e)))?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let stdout_handle = child.stdout.take();
+        let cmd_future = async {
+            let stdout_string = if let Some(out) = stdout_handle {
+                use tokio::io::{AsyncBufReadExt, BufReader};
+                let reader = BufReader::new(out);
+                let mut lines = reader.lines();
+                let mut buffer = String::new();
+
+                while let Ok(Some(line)) = lines.next_line().await {
+                    println!("{}", line);
+                    buffer.push_str(&line);
+                    buffer.push('\n');
+                }
+                buffer
+            } else {
+                String::new()
+            };
+            let status = child.wait().await
+                .map_err(|e| WorkflowError::Other(format!("执行命令失败: {}", e)))?;
+            Ok::<_, WorkflowError>((stdout_string, status))
+        };
+
+        let (stdout, status) = if let Some(timeout) = step_timeout {
+            tokio::time::timeout(timeout, cmd_future)
+                .await
+                .map_err(|_| WorkflowError::Timeout {
+                    timeout_ms: timeout.as_millis() as u64,
+                })?
+        } else {
+            cmd_future.await
+        }?;
+
+        if !status.success() {
             return Ok(StepResult::failed(
                 &step_def.id,
                 StepError {
-                    code: format!("EXIT_{}", output.status.code().unwrap_or(-1)),
-                    message: stderr,
+                    code: format!("EXIT_{}", status.code().unwrap_or(-1)),
+                    message: if !stdout.is_empty() { stdout } else { "命令执行失败".to_string() },
                     fix: Some("检查命令语法和执行环境".to_string()),
                 },
             ));
         }
 
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let output_value = serde_json::json!({ "stdout": stdout });
 
         Ok(StepResult::success(&step_def.id, output_value))
+    }
+
+    fn parse_step_timeout(timeout_str: Option<&str>) -> Result<Option<Duration>, WorkflowError> {
+        let s = match timeout_str {
+            Some(s) if !s.trim().is_empty() => s.trim().to_lowercase(),
+            _ => return Ok(None),
+        };
+
+        if let Some(pos) = s.chars().position(|c| !c.is_ascii_digit()) {
+            let num = s[..pos]
+                .parse::<u64>()
+                .map_err(|_| WorkflowError::Other(format!("无效的超时时间: {}", s)))?;
+            let unit = &s[pos..];
+            let duration = match unit {
+                "s" | "sec" | "second" | "seconds" => Duration::from_secs(num),
+                "ms" | "millisec" | "millisecond" | "milliseconds" => {
+                    Duration::from_millis(num)
+                }
+                "m" | "min" | "minute" | "minutes" => Duration::from_secs(num * 60),
+                "h" | "hour" | "hours" => Duration::from_secs(num * 3600),
+                _ => {
+                    return Err(WorkflowError::Other(format!(
+                        "不支持的时间单位: {}",
+                        unit
+                    )))
+                }
+            };
+            Ok(Some(duration))
+        } else {
+            let num = s
+                .parse::<u64>()
+                .map_err(|_| WorkflowError::Other(format!("无效的超时时间: {}", s)))?;
+            Ok(Some(Duration::from_secs(num)))
+        }
     }
 
     async fn execute_parallel_step(
@@ -934,6 +1033,201 @@ impl Scheduler {
         }
 
         self.build_result(execution_id, start_time, all_results, errors).await
+    }
+
+    /// 从指定步骤继续执行
+    ///
+    /// 加载保存的 step_outputs 到 context，找到目标 step 所在的 batch，
+    /// 将前置 batch 中的步骤标记为 Skipped（保留缓存的 output），
+    /// 从目标 batch 开始正常执行。
+    ///
+    /// 返回 (WorkflowResult, 跳过的步骤数)
+    pub async fn run_from_step(
+        &self,
+        from_step_id: &str,
+        saved_step_outputs: HashMap<StepId, StepResult>,
+        saved_variables: HashMap<String, serde_json::Value>,
+    ) -> Result<(WorkflowResult, usize), WorkflowError> {
+        // 验证 step_id 存在
+        if self.dag.get_step(&from_step_id.to_string()).is_none() {
+            let available: Vec<String> = self.dag.get_steps().iter().map(|s| s.id.clone()).collect();
+            return Err(WorkflowError::FromStepNotFound {
+                step_id: from_step_id.to_string(),
+                available: available.join(", "),
+            });
+        }
+
+        let start_time = Utc::now();
+        let execution_id = format!("exec_{}_from_{}", start_time.timestamp_millis(), from_step_id);
+
+        // 恢复 step_outputs 和 variables 到 context
+        {
+            let mut ctx = self.context.write().await;
+            for (step_id, result) in &saved_step_outputs {
+                ctx.step_outputs.insert(step_id.clone(), result.clone());
+            }
+            for (key, value) in saved_variables {
+                ctx.variables.insert(key, value);
+            }
+        }
+
+        let batches = self.dag.topological_sort()?;
+
+        // 找到目标 step 所在的 batch index
+        let target_batch_index = batches
+            .iter()
+            .position(|batch| batch.iter().any(|id| id == from_step_id))
+            .unwrap();
+
+        let mut all_results: Vec<StepResult> = Vec::new();
+        let mut errors: Vec<StepError> = Vec::new();
+        let mut skipped_count: usize = 0;
+
+        // 处理前置 batches：标记为 Skipped，保留缓存的 output
+        for batch in batches.iter().take(target_batch_index) {
+            for step_id in batch {
+                if let Some(cached) = saved_step_outputs.get(step_id) {
+                    all_results.push(Self::skipped_with_cached_output(
+                        step_id,
+                        cached,
+                        from_step_id,
+                    ));
+                } else {
+                    all_results.push(StepResult::skipped(
+                        step_id,
+                        format!("从步骤 {} 继续执行，无缓存输出", from_step_id),
+                    ));
+                }
+                skipped_count += 1;
+            }
+        }
+
+        // 从目标 batch 开始正常执行（与 run() 相同的逻辑）
+        for batch_index in target_batch_index..batches.len() {
+            let batch = &batches[batch_index];
+            let batch_results = self.execute_batch(batch).await?;
+
+            for result in &batch_results {
+                let mut ctx = self.context.write().await;
+                ctx.step_outputs.insert(result.step_id.clone(), result.clone());
+            }
+
+            let has_failure = batch_results.iter().any(|r| r.status == StepStatus::Failed);
+            all_results.extend(batch_results);
+
+            if let Some(checkpoint_path) = &self.config.checkpoint {
+                if !checkpoint_path.is_empty() {
+                    let ctx = self.context.read().await;
+                    let mut checkpoint = crate::utils::checkpoint::Checkpoint::new(
+                        execution_id.clone(),
+                        "workflow".to_string(),
+                        start_time,
+                        ChronoDuration::seconds(300),
+                    );
+
+                    for result in &all_results {
+                        if result.status == StepStatus::Success {
+                            checkpoint.mark_step_completed(result.step_id.clone());
+                        } else if result.status == StepStatus::Failed {
+                            checkpoint.mark_step_failed(result.step_id.clone());
+                        }
+                        checkpoint.record_step_output(result.step_id.clone(), result.clone());
+                    }
+
+                    for (key, value) in ctx.variables.iter() {
+                        checkpoint.set_variable(key.clone(), value.clone());
+                    }
+
+                    checkpoint.current_batch = batch_index;
+                    let _ = self.checkpoint_manager.save(&mut checkpoint);
+                }
+            }
+
+            // 每步保存运行上下文
+            let failed_info = if has_failure {
+                all_results.iter().find(|r| r.status == StepStatus::Failed).map(|r| FailedStepInfo {
+                    step_id: r.step_id.clone(),
+                    error_code: r.error.as_ref().map(|e| e.code.clone()).unwrap_or_default(),
+                    error_message: r.error.as_ref().map(|e| e.message.clone()).unwrap_or_default(),
+                    fix_suggestion: r.error.as_ref().and_then(|e| e.fix.clone()),
+                })
+            } else {
+                None
+            };
+            self.persist_run_context(&all_results, failed_info).await;
+
+            if let Some(on_failure) = &self.config.on_failure {
+                if has_failure {
+                    let batch_errors: Vec<StepError> = all_results
+                        .iter()
+                        .filter(|r| r.status == StepStatus::Failed)
+                        .filter_map(|r| r.error.clone())
+                        .collect();
+
+                    match on_failure {
+                        OnFailureStrategy::Abort => {
+                            errors.extend(batch_errors);
+                            let result = self.build_result(execution_id, start_time, all_results, errors).await?;
+                            return Ok((result, skipped_count));
+                        }
+                        OnFailureStrategy::Pause => {
+                            errors.extend(batch_errors);
+                            let result = self.build_result(execution_id, start_time, all_results, errors).await?;
+                            return Ok((result, skipped_count));
+                        }
+                        OnFailureStrategy::Continue => {
+                            errors.extend(batch_errors);
+                        }
+                    }
+                }
+            }
+        }
+
+        let result = self.build_result(execution_id, start_time, all_results, errors).await?;
+        Ok((result, skipped_count))
+    }
+
+    fn skipped_with_cached_output(
+        step_id: &str,
+        cached_result: &StepResult,
+        _from_step: &str,
+    ) -> StepResult {
+        let now = Utc::now();
+        StepResult {
+            step_id: step_id.to_string(),
+            status: StepStatus::Skipped,
+            started_at: now,
+            completed_at: Some(now),
+            duration_ms: Some(0),
+            output: cached_result.output.clone(),
+            error: None,
+        }
+    }
+
+    async fn persist_run_context(
+        &self,
+        all_results: &[StepResult],
+        failed_info: Option<FailedStepInfo>,
+    ) {
+        let workflow_path = match &self.workflow_path {
+            Some(p) => p.clone(),
+            None => return,
+        };
+
+        let ctx = self.context.read().await;
+        let step_outputs: HashMap<StepId, StepResult> = all_results
+            .iter()
+            .filter(|r| r.status == StepStatus::Success || r.status == StepStatus::Skipped)
+            .map(|r| (r.step_id.clone(), r.clone()))
+            .collect();
+
+        let _ = RunContext::save(
+            &workflow_path,
+            ctx.inputs.clone(),
+            ctx.variables.clone(),
+            step_outputs,
+            failed_info,
+        );
     }
 
     async fn build_result(

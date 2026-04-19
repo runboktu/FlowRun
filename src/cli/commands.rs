@@ -43,6 +43,10 @@ pub enum Commands {
         /// 模拟执行（不实际运行步骤）
         #[arg(long)]
         dry_run: bool,
+
+        /// 从指定步骤继续执行（使用上次失败时保存的上下文）
+        #[arg(long, value_name = "STEP_ID")]
+        from_step: Option<String>,
     },
 
     /// 从检查点恢复工作流执行
@@ -231,15 +235,16 @@ fn parse_key_value(s: &str) -> anyhow::Result<(String, String)> {
 impl Args {
     /// 解析并返回工作流执行参数
     pub fn parse_workflow_args(&self) -> anyhow::Result<WorkflowArgs> {
-        let (inputs, json, dry_run) = match &self.command {
+        let (inputs, json, dry_run, from_step) = match &self.command {
             Commands::Run {
                 input,
                 json,
                 dry_run,
+                from_step,
                 ..
-            } => (input.clone(), *json, *dry_run),
-            Commands::Resume { input, json, .. } => (input.clone(), *json, false),
-            Commands::DryRun { input, json, .. } => (input.clone(), *json, true),
+            } => (input.clone(), *json, *dry_run, from_step.clone()),
+            Commands::Resume { input, json, .. } => (input.clone(), *json, false, None),
+            Commands::DryRun { input, json, .. } => (input.clone(), *json, true, None),
             _ => return Ok(WorkflowArgs::default()),
         };
 
@@ -249,6 +254,7 @@ impl Args {
             json,
             dry_run,
             verbose: self.verbose,
+            from_step,
         })
     }
 }
@@ -266,6 +272,8 @@ pub struct WorkflowArgs {
     pub dry_run: bool,
     /// 是否启用详细日志
     pub verbose: bool,
+    /// 从指定步骤继续执行
+    pub from_step: Option<String>,
 }
 
 impl Default for WorkflowArgs {
@@ -276,6 +284,7 @@ impl Default for WorkflowArgs {
             json: false,
             dry_run: false,
             verbose: false,
+            from_step: None,
         }
     }
 }
