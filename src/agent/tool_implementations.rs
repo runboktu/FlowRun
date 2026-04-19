@@ -152,7 +152,16 @@ impl ToolHandler for PythonTool {
                 if output.status.success() {
                     ToolResult::success(String::from_utf8_lossy(&output.stdout).to_string())
                 } else {
-                    ToolResult::error(String::from_utf8_lossy(&output.stderr).to_string())
+                    let mut parts = Vec::new();
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    if !stdout.trim().is_empty() {
+                        parts.push(format!("stdout: {}", stdout));
+                    }
+                    if !stderr.trim().is_empty() {
+                        parts.push(format!("stderr: {}", stderr));
+                    }
+                    ToolResult::error(parts.join("\n"))
                 }
             }
             Ok(Err(e)) => ToolResult::error(format!("Python execution failed: {}", e)),

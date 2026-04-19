@@ -40,10 +40,14 @@ impl Executor for ToolExecutor {
             let handler = create_tool_handler(tool_def, &self.builtin_registry)?;
             handler.execute(&args).await
         } else if let Some(tool_name) = &step.tool_name {
-            return Err(WorkflowError::Other(format!(
-                "Tool '{}' not found. Use inline 'tool:' definition instead of 'tool_name'.",
-                tool_name
-            )));
+            let handler = self.builtin_registry.lookup(tool_name).ok_or_else(|| {
+                WorkflowError::Other(format!(
+                    "Tool '{}' not found in builtin registry. Available: {}",
+                    tool_name,
+                    self.builtin_registry.list_all().join(", ")
+                ))
+            })?;
+            handler.execute(&args).await
         } else {
             return Err(WorkflowError::Other(
                 "Tool step must have 'tool' (inline definition)".to_string()

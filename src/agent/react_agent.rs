@@ -268,6 +268,8 @@ impl ReActAgent {
 
         let mut iteration_count = 0;
         while iteration_count < self.max_iterations {
+            eprintln!("\n    [Agent Stream:{}] iteration_count", iteration_count);
+
             iteration_count += 1;
 
             callback(
@@ -305,9 +307,13 @@ impl ReActAgent {
                             AgentStatus::LlmResponse,
                         );
                     }
+                    eprintln!("\n    [Agent Stream: chunk.done");
+
                     break;
                 }
             }
+
+            eprintln!("\n    [Agent Stream: chunk_result not some");
 
             self.messages.push(Message::assistant(accumulator.clone()));
             let parsed = self.parser.parse(&accumulator);
@@ -317,6 +323,8 @@ impl ReActAgent {
                     serde_json::json!({"type": "final_answer", "content": final_answer}).to_string(),
                     AgentStatus::IterationEnd,
                 );
+                eprintln!("\n    [Agent Stream: final_answer");
+
                 return Ok(final_answer.clone());
             }
 
@@ -356,10 +364,12 @@ impl ReActAgent {
 
                 self.messages.push(Message::user(format!("<observation>{}</observation>", result.content)));
             } else {
-                return Ok(accumulator);
+                eprintln!("\n    [Agent Stream: no action");
+
+                // return Ok(accumulator);
             }
         }
-
+        eprintln!("\n    [Agent Stream: IterationEnd");
         callback(
             serde_json::json!({"type": "error", "content": "Max iterations reached"}).to_string(),
             AgentStatus::IterationEnd,

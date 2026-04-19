@@ -64,6 +64,13 @@ notify = "6.1"
 # Cron 表达式
 cron = "0.12"
 
+[profile.release]
+opt-level = "z"        # 最小体积优化（比 "s" 更激进）
+lto = true             # 跨 crate 全链接时优化，消除未使用代码
+codegen-units = 1      # 单 codegen unit → 更好的内联 + 更小的二进制
+strip = true           # 剥离调试符号和符号表
+panic = "abort"        # abort 替代 unwind，去掉 unwind 表和相关代码
+
 [dev-dependencies]
 # 测试用
 tempfile = "3.9"
