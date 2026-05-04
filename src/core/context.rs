@@ -76,12 +76,24 @@ impl ExecutionContext {
         // 从工作流定义中获取变量
         let variables = workflow.variables.clone().unwrap_or_default();
 
+        // 合并默认值：用户未提供的 input 使用定义中的 default
+        let mut merged_inputs = inputs;
+        if let Some(input_defs) = &workflow.inputs {
+            for input_def in input_defs {
+                if !merged_inputs.contains_key(&input_def.name) {
+                    if let Some(default_val) = &input_def.default {
+                        merged_inputs.insert(input_def.name.clone(), default_val.clone());
+                    }
+                }
+            }
+        }
+
         Self {
             workflow_id,
             workflow_name: workflow.name.clone(),
             execution_id,
             started_at: Utc::now(),
-            inputs,
+            inputs: merged_inputs,
             step_outputs: HashMap::new(),
             completed_steps: HashSet::new(),
             failed_steps: HashSet::new(),
